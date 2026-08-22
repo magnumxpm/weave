@@ -146,6 +146,19 @@ gcloud run jobs execute weave-subscription-manager --region=$REGION --project=$P
 gcloud scheduler jobs resume weave-subscription-manager --location=$REGION --project=$PROJECT_ID
 ```
 
+`onboarded_users` takes **numeric Cloud Identity ids**, not emails: the Meet
+backend rejects both an email address and the literal `me` with
+`TARGET_RESOURCE_ACCESS_DENIED`. Get a user's id without any special access:
+
+```bash
+curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  https://openidconnect.googleapis.com/v1/userinfo    # "sub" is the id
+```
+
+To list emails instead, add `https://www.googleapis.com/auth/admin.directory.user.readonly`
+to the subscriptions SA's delegation entry and pass a resolver; numeric ids need
+only the Meet scope.
+
 Meet transcription must be ON for those users (Admin Console → Apps → Google
 Workspace → Google Meet), and check whether the explicit-consent policy for
 transcripts is enabled — if it is, a transcript only exists for meetings where a
@@ -162,3 +175,5 @@ participant accepted the prompt.
 | Agent Engine returns "no final response" | model name not on Vertex | see §7 |
 | `gcloud builds submit --tag` rejects `-f` | `--tag` mode cannot set a Dockerfile path | use the `cloudbuild.yaml` configs in each service |
 | Terraform/gcloud fail with `invalid_rapt` | Workspace reauth policy expired the session | `gcloud auth login` again |
+| `TARGET_RESOURCE_ACCESS_DENIED` creating a subscription | target must be the numeric Cloud Identity id | see §9 |
+| A loop variable before `:method` in a URL 404s in zsh | zsh reads `$var:g...` as a history modifier | brace it: `${var}:generateContent` |
