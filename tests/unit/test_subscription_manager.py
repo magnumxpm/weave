@@ -56,11 +56,12 @@ def expiring_in(days: float) -> dict[str, Any]:
 
 def test_creates_subscription_targeting_the_user_and_topic() -> None:
     service = FakeService()
-    outcome = ensure_subscription(service, "12345", TOPIC, NOW)
+    outcome = ensure_subscription(service, "user@example.com", TOPIC, NOW)
 
     assert outcome.action == "created"
     body = service.subscription_service.created[0]
-    assert body["targetResource"] == "//cloudidentity.googleapis.com/users/12345"
+    # "me" is the delegated user; an email here is rejected by the API.
+    assert body["targetResource"] == "//cloudidentity.googleapis.com/users/me"
     assert body["eventTypes"] == [EVENT_TYPE]
     assert body["notificationEndpoint"]["pubsubTopic"] == TOPIC
     # Transcript content must never ride along in the event.
@@ -69,7 +70,7 @@ def test_creates_subscription_targeting_the_user_and_topic() -> None:
 
 def test_healthy_subscription_is_left_alone() -> None:
     service = FakeService([expiring_in(5)])
-    outcome = ensure_subscription(service, "12345", TOPIC, NOW)
+    outcome = ensure_subscription(service, "user@example.com", TOPIC, NOW)
     assert outcome.action == "current"
     assert service.subscription_service.created == []
     assert service.subscription_service.reactivated == []
@@ -77,20 +78,20 @@ def test_healthy_subscription_is_left_alone() -> None:
 
 def test_subscription_near_expiry_is_renewed() -> None:
     service = FakeService([expiring_in(1)])
-    outcome = ensure_subscription(service, "12345", TOPIC, NOW)
+    outcome = ensure_subscription(service, "user@example.com", TOPIC, NOW)
     assert outcome.action == "renewed"
     assert service.subscription_service.reactivated == ["subscriptions/existing"]
 
 
 def test_expired_subscription_is_renewed() -> None:
     service = FakeService([expiring_in(-1)])
-    assert ensure_subscription(service, "12345", TOPIC, NOW).action == "renewed"
+    assert ensure_subscription(service, "user@example.com", TOPIC, NOW).action == "renewed"
 
 
 def test_deleted_subscription_is_replaced_not_reused() -> None:
     deleted = expiring_in(5) | {"state": "DELETED"}
     service = FakeService([deleted])
-    assert ensure_subscription(service, "12345", TOPIC, NOW).action == "created"
+    assert ensure_subscription(service, "user@example.com", TOPIC, NOW).action == "created"
 
 
 def test_one_user_failure_does_not_stop_the_sweep() -> None:

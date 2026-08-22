@@ -42,13 +42,21 @@ def _needs_renewal(subscription: dict[str, Any], now: datetime) -> bool:
 def ensure_subscription(
     service: Any, user_id: str, topic: str, now: datetime | None = None
 ) -> SubscriptionOutcome:
-    """Create the user's transcript subscription, or renew it when close to expiry."""
-    now = now or datetime.now(UTC)
-    target = f"//cloudidentity.googleapis.com/users/{user_id}"
+    """Create the user's transcript subscription, or renew it when close to expiry.
 
+    The target is always `users/me`: the service is built with credentials
+    delegated to this specific user, so "me" is that user. Using the email
+    directly fails (TARGET_RESOURCE_ACCESS_DENIED) because the API expects the
+    numeric Cloud Identity id, which would need an extra Directory scope.
+    """
+    now = now or datetime.now(UTC)
+    target = "//cloudidentity.googleapis.com/users/me"
+
+    # The delegated caller can only ever see its own subscriptions, so filtering
+    # on event type alone is already user-scoped.
     existing = (
         service.subscriptions()
-        .list(filter=f'target_resource="{target}" AND event_types:"{EVENT_TYPE}"')
+        .list(filter=f'event_types:"{EVENT_TYPE}"')
         .execute()
         .get("subscriptions", [])
     )
