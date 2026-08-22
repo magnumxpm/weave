@@ -122,8 +122,8 @@ def create_app(
             return Response(status_code=403)
         try:
             token_verifier(token)
-        except PushAuthError:
-            logger.warning("rejected push with invalid token")
+        except PushAuthError as error:
+            logger.warning("rejected push", extra={"reason": str(error)})
             return Response(status_code=403)
 
         body = await request.json()

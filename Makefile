@@ -33,9 +33,10 @@ REGION ?= us-central1
 
 build-image:
 	gcloud builds submit --project=$(PROJECT_ID) \
-	  --tag=$(REGION)-docker.pkg.dev/$(PROJECT_ID)/weave/ingestion:$(IMAGE_TAG) \
+	  --config=services/ingestion/cloudbuild.yaml \
+	  --substitutions=_IMAGE=$(REGION)-docker.pkg.dev/$(PROJECT_ID)/weave/ingestion:$(IMAGE_TAG) \
 	  --gcs-source-staging-dir=gs://$(PROJECT_ID)-adk-staging/cloudbuild \
-	  -f services/ingestion/Dockerfile .
+	  --service-account=projects/$(PROJECT_ID)/serviceAccounts/weave-build-sa@$(PROJECT_ID).iam.gserviceaccount.com .
 
 deploy-agent:
 	rm -rf dist && uv build --all-packages

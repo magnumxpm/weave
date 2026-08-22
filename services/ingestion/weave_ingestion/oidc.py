@@ -23,10 +23,10 @@ def verify_push_token(token: str, *, audience: str, expected_sa: str) -> dict[st
             token, google.auth.transport.requests.Request(), audience=audience
         )
     except Exception as error:
-        raise PushAuthError("token verification failed") from error
+        raise PushAuthError(f"signature/audience check failed: {error}") from error
 
     if not claims.get("email_verified"):
         raise PushAuthError("email not verified")
     if claims.get("email") != expected_sa:
-        raise PushAuthError("unexpected service account")
+        raise PushAuthError(f"unexpected service account: {claims.get('email')}")
     return claims
