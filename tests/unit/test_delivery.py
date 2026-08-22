@@ -147,3 +147,25 @@ def test_chat_deliverer_sends_exactly_one_owner_card() -> None:
 def test_gemini_enterprise_is_explicitly_unimplemented() -> None:
     with pytest.raises(NotImplementedError, match="unverified"):
         GeminiEnterpriseDeliverer().deliver("owner@example.com", bundle())
+
+
+class DirectoryStub:
+    def __init__(self, mapping: dict[str, str]) -> None:
+        self.mapping = mapping
+        self.lookups: list[str] = []
+
+    def user_id_for_email(self, email: str) -> str:
+        self.lookups.append(email)
+        return self.mapping[email]
+
+
+def test_chat_targets_numeric_id_not_email() -> None:
+    # Chat accepts an email alias only under end-user auth; this service uses
+    # app auth, where only the numeric id resolves.
+    client = ChatClient()
+    directory = DirectoryStub({"owner@example.com": "112655489411114378906"})
+    deliverer = ChatDeliverer(client, lambda email: f"users/{directory.user_id_for_email(email)}")
+    deliverer.deliver("owner@example.com", bundle())
+
+    assert directory.lookups == ["owner@example.com"]
+    assert client.space_service.find_calls == ["users/112655489411114378906"]

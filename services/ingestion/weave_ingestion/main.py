@@ -66,9 +66,26 @@ def _build_chat_deliverer(settings: Settings) -> Deliverer:
     from google.auth import default as default_credentials
     from googleapiclient.discovery import build
 
+    from weave_ingestion.directory_client import DirectoryClient
+    from weave_ingestion.google_auth import delegated_credentials
+
     credentials, _ = default_credentials(scopes=["https://www.googleapis.com/auth/chat.bot"])
     client = build("chat", "v1", credentials=credentials)
-    return ChatDeliverer(client, lambda email: f"users/{email}")
+
+    # App-authenticated Chat calls cannot use an email alias, so resolve the
+    # owner's numeric id through the directory.
+    directory = DirectoryClient(
+        build(
+            "admin",
+            "directory_v1",
+            credentials=delegated_credentials(
+                settings.workspace_subject,
+                ["https://www.googleapis.com/auth/admin.directory.user.readonly"],
+                f"weave-ingestion-sa@{settings.project_id}.iam.gserviceaccount.com",
+            ),
+        )
+    )
+    return ChatDeliverer(client, lambda email: f"users/{directory.user_id_for_email(email)}")
 
 
 def create_app(

@@ -28,6 +28,10 @@ class Settings(BaseModel):
             raise ValueError("fixture_dir is required when artifact_source=fixture")
         if self.artifact_source == "live" and not self.workspace_subject:
             raise ValueError("workspace_subject is required when artifact_source=live")
+        # Chat delivery resolves owner ids through the directory, which is a
+        # delegated call and therefore needs a subject to impersonate.
+        if self.delivery_mode == "chat" and not self.workspace_subject:
+            raise ValueError("workspace_subject is required when delivery_mode=chat")
         return self
 
 
