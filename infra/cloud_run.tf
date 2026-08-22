@@ -1,0 +1,90 @@
+# Pass 2 (create_cloud_run=true): ingestion service + authenticated push subscription.
+
+resource "google_cloud_run_v2_service" "ingestion" {
+  count    = var.create_cloud_run ? 1 : 0
+  name     = "weave-ingestion"
+  location = var.region
+  ingress  = "INGRESS_TRAFFIC_ALL" # no allUsers binding; OIDC on the push sub is the control
+
+  template {
+    service_account                  = google_service_account.ingestion.email
+    timeout                          = "600s"
+    max_instance_request_concurrency = 4
+
+    containers {
+      image = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.weave.repository_id}/ingestion:${var.image_tag}"
+
+      resources {
+        cpu_idle = false # transcript processing continues after the HTTP response begins
+      }
+
+      env {
+        name  = "PROJECT_ID"
+        value = var.project_id
+      }
+      env {
+        name  = "REGION"
+        value = var.region
+      }
+      env {
+        name  = "AGENT_ENGINE_ID"
+        value = var.agent_engine_id
+      }
+      env {
+        name  = "PUBSUB_PUSH_SA"
+        value = google_service_account.pubsub_push.email
+      }
+      env {
+        name  = "PUBSUB_PUSH_AUDIENCE"
+        value = var.pubsub_push_audience
+      }
+    }
+
+    scaling {
+      max_instance_count = 3
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.image_tag != "" && var.agent_engine_id != ""
+      error_message = "Pass 2 requires image_tag and agent_engine_id."
+    }
+  }
+}
+
+resource "google_cloud_run_v2_service_iam_member" "push_invoker" {
+  count    = var.create_cloud_run ? 1 : 0
+  name     = google_cloud_run_v2_service.ingestion[0].name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = google_service_account.pubsub_push.member
+}
+
+resource "google_pubsub_subscription" "meet_artifacts_push" {
+  count                = var.create_cloud_run ? 1 : 0
+  name                 = "meet-artifacts-push"
+  topic                = google_pubsub_topic.meet_artifacts.id
+  ack_deadline_seconds = 600
+
+  push_config {
+    push_endpoint = "${google_cloud_run_v2_service.ingestion[0].uri}/pubsub-push"
+
+    oidc_token {
+      service_account_email = google_service_account.pubsub_push.email
+      audience              = var.pubsub_push_audience
+    }
+  }
+
+  dead_letter_policy {
+    dead_letter_topic     = google_pubsub_topic.meet_artifacts_dlq.id
+    max_delivery_attempts = 5
+  }
+
+  retry_policy {
+    minimum_backoff = "10s"
+    maximum_backoff = "600s"
+  }
+
+  depends_on = [google_service_account_iam_member.pubsub_token_creator]
+}

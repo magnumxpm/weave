@@ -1,0 +1,7 @@
+[
+  {"email": "maya@example.com", "participant_id": "participants/1", "display_name": "Maya"},
+  {"email": "sarah@example.com", "participant_id": "participants/2", "display_name": "Sarah Chen"},
+  {"email": "jordan@example.com", "participant_id": "participants/3", "display_name": "Jordan Lee"},
+  {"email": "alex@example.com", "participant_id": "participants/4", "display_name": "Alex Kim"},
+  {"email": "priya@example.com", "participant_id": "participants/5", "display_name": "Priya Shah"}
+]

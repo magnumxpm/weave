@@ -1,0 +1,21 @@
+[project]
+name = "weave-ingestion"
+version = "0.1.0"
+description = "Weave ingestion and delivery interfaces"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "google-api-python-client>=2.166.0",
+    "google-auth>=2.38.0",
+    "weave-common",
+]
+
+[tool.uv.sources]
+weave-common = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "weave_ingestion"
+module-root = ""
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"

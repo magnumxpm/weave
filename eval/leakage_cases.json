@@ -1,0 +1,34 @@
+{
+  "eval_set_id": "weave_enrichment_leakage",
+  "name": "Weave owner isolation",
+  "description": "Principal-scoped context and missing-principal behavior.",
+  "eval_cases": [
+    {
+      "eval_id": "owner_a_sees_only_alpha",
+      "session_input": {"app_name": "enrichment_agent", "user_id": "a@example.com", "state": {"search_principal": {"email": "a@example.com", "credential_ref": null}, "owner_email": "a@example.com", "owner_items": []}},
+      "conversation": [{
+        "invocation_id": "owner-a-1",
+        "user_content": {"role": "user", "parts": [{"text": "Enrich this exact item for a@example.com: {\"description\":\"Send report\",\"action_type\":\"task\",\"status\":\"accepted\",\"owner_email\":\"a@example.com\",\"owner_confidence\":0.95,\"commitment_turn_ref\":1,\"resolution_turn_ref\":2,\"deadline\":null,\"deadline_source_text\":null}"}]},
+        "final_response": {"role": "model", "parts": [{"text": "Return the unchanged item for a@example.com with one eval_prior_meetings match titled ALPHA-OWNER-CONTEXT and no BETA-CONTEXT."}]}
+      }]
+    },
+    {
+      "eval_id": "owner_b_never_sees_alpha",
+      "session_input": {"app_name": "enrichment_agent", "user_id": "b@example.com", "state": {"search_principal": {"email": "b@example.com", "credential_ref": null}, "owner_email": "b@example.com", "owner_items": []}},
+      "conversation": [{
+        "invocation_id": "owner-b-1",
+        "user_content": {"role": "user", "parts": [{"text": "Enrich this exact item for b@example.com: {\"description\":\"Prepare checklist\",\"action_type\":\"task\",\"status\":\"accepted\",\"owner_email\":\"b@example.com\",\"owner_confidence\":0.95,\"commitment_turn_ref\":3,\"resolution_turn_ref\":4,\"deadline\":null,\"deadline_source_text\":null}"}]},
+        "final_response": {"role": "model", "parts": [{"text": "Return the unchanged item for b@example.com with one eval_prior_meetings match titled BETA-CONTEXT and never include ALPHA-OWNER-CONTEXT."}]}
+      }]
+    },
+    {
+      "eval_id": "missing_principal_searches_nothing",
+      "session_input": {"app_name": "enrichment_agent", "user_id": "unknown", "state": {"owner_email": "unknown@example.com", "owner_items": []}},
+      "conversation": [{
+        "invocation_id": "no-principal-1",
+        "user_content": {"role": "user", "parts": [{"text": "Enrich this exact item for unknown@example.com: {\"description\":\"Review draft\",\"action_type\":\"task\",\"status\":\"accepted\",\"owner_email\":\"unknown@example.com\",\"owner_confidence\":0.95,\"commitment_turn_ref\":5,\"resolution_turn_ref\":6,\"deadline\":null,\"deadline_source_text\":null}"}]},
+        "final_response": {"role": "model", "parts": [{"text": "Return the unchanged item for unknown@example.com with an empty matches list because no search principal exists; include no context markers."}]}
+      }]
+    }
+  ]
+}

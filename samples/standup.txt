@@ -1,0 +1,9 @@
+Maya: Sarah, can you send the launch report by Friday?
+Sarah: Yes, I'll send the launch report by Friday.
+Maya: Jordan, can you own the vendor follow-up?
+Jordan: No, I cannot take that this week.
+Maya: Alex, please prepare the rollout checklist.
+Maya: Moving on to the support rotation.
+Maya: Priya, can you update the migration guide?
+Priya: Please give that to Sarah instead.
+Sarah: Yes, I can update the migration guide.
