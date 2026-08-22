@@ -11,6 +11,12 @@ resource "google_cloud_run_v2_service" "ingestion" {
   # Terraform self-reference cycle, so it must be registered explicitly.
   custom_audiences = [var.pubsub_push_audience]
 
+  # Service-level scaling is server-populated; declaring it avoids a permanent
+  # diff against the revision-level block inside `template`.
+  scaling {
+    min_instance_count = 0
+  }
+
   template {
     service_account                  = google_service_account.ingestion.email
     timeout                          = "600s"
@@ -68,6 +74,7 @@ resource "google_cloud_run_v2_service" "ingestion" {
 
     scaling {
       max_instance_count = 3
+      min_instance_count = 0
     }
   }
 

@@ -4,7 +4,8 @@ resource "google_cloud_scheduler_job" "subscription_manager" {
   region    = var.region
   schedule  = "0 */6 * * *"
   time_zone = "Etc/UTC"
-  paused    = true
+  # Enabled once the subscription manager job is deployed and verified.
+  paused = !var.create_subscription_manager
 
   http_target {
     http_method = "POST"
