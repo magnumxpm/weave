@@ -329,11 +329,26 @@ def create_app(
             if not isinstance(encoded, str):
                 raise TypeError("Pub/Sub data must be base64 text")
             decoded = base64.b64decode(encoded, validate=True).decode("utf-8", errors="strict")
-            event = parse_chat_event(json.loads(decoded))
+            raw = json.loads(decoded)
+            event = parse_chat_event(raw)
         except (ValueError, TypeError, json.JSONDecodeError):
             logger.warning("malformed Chat event acked")
             return Response(status_code=200)
         if event is None:
+            # A user messaging the app lands here legitimately, but so does an
+            # unrecognised payload shape. Chat's Pub/Sub envelope is only
+            # verifiable against a real install, so log enough to tell the two
+            # apart rather than acking a failed onboarding into silence.
+            envelope = raw if isinstance(raw, dict) else {}
+            space = envelope.get("space")
+            logger.info(
+                "chat event ignored",
+                extra={
+                    "event_type": envelope.get("type") or envelope.get("eventType"),
+                    "payload_keys": sorted(envelope),
+                    "space_type": space.get("spaceType") if isinstance(space, dict) else None,
+                },
+            )
             return Response(status_code=200)
 
         try:

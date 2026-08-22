@@ -3,6 +3,8 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any
 
+import pytest
+from pydantic import ValidationError
 from weave_ingestion.firestore_client import MEETINGS, ONBOARDED, MeetingLedger
 
 
@@ -81,6 +83,15 @@ def test_upsert_preserves_first_onboarded_time_and_reactivates() -> None:
     assert stored["status"] == "active"
     assert stored["onboarded_at"] == "original"
     assert stored["dm_space"] == "spaces/new"
+
+
+def test_upsert_rejects_an_unusable_email_without_writing() -> None:
+    # A record that fails validation would be skipped by every later read, so
+    # the user would look onboarded and silently receive nothing.
+    client = Client()
+    with pytest.raises(ValidationError):
+        MeetingLedger(client).upsert_onboarded_user(user_id="123", email="", dm_space="spaces/dm")
+    assert client.collections.get(ONBOARDED, {}) == {}
 
 
 def test_offboarding_tombstone_is_deleted_only_explicitly() -> None:

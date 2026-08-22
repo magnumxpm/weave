@@ -138,27 +138,25 @@ class MeetingLedger:
         Installing the app is an opt-in signal only. Domain-wide delegation,
         not this document, remains the authority for Workspace data access.
         """
-        normalized_email = email.strip().casefold()
+        # Validate before writing. A record that fails validation is skipped by
+        # onboarded_users() forever, so it must never reach storage: the user
+        # would appear onboarded while silently receiving nothing.
+        user = OnboardedUser(user_id=user_id, email=email, dm_space=dm_space, status="active")
         now = datetime.now(UTC)
-        reference = self.client.collection(ONBOARDED).document(user_id)
+        reference = self.client.collection(ONBOARDED).document(user.user_id)
         existing = reference.get().to_dict() or {}
         reference.set(
             {
-                "user_id": user_id,
-                "email": normalized_email,
-                "dm_space": dm_space,
+                "user_id": user.user_id,
+                "email": user.email,
+                "dm_space": user.dm_space,
                 "status": "active",
                 "onboarded_at": existing.get("onboarded_at", now),
                 "updated_at": now,
             },
             merge=True,
         )
-        return OnboardedUser(
-            user_id=user_id,
-            email=normalized_email,
-            dm_space=dm_space,
-            status="active",
-        )
+        return user
 
     def mark_offboarding(
         self,
