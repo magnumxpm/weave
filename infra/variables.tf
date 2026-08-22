@@ -27,6 +27,34 @@ variable "agent_engine_id" {
   description = "Full reasoning engine resource name (required when create_cloud_run=true)."
 }
 
+variable "artifact_source" {
+  type        = string
+  default     = "fixture"
+  description = "Where transcripts come from: 'fixture' (bundled samples, no Workspace needed) or 'live' (Meet API via DWD)."
+
+  validation {
+    condition     = contains(["fixture", "live"], var.artifact_source)
+    error_message = "artifact_source must be 'fixture' or 'live'."
+  }
+}
+
+variable "workspace_subject" {
+  type        = string
+  default     = ""
+  description = "Workspace user the ingestion SA impersonates for Meet/Directory reads (required when artifact_source=live)."
+}
+
+variable "delivery_mode" {
+  type        = string
+  default     = "log"
+  description = "'log' renders cards to Cloud Logging; 'chat' DMs owners via the Chat app."
+
+  validation {
+    condition     = contains(["log", "chat"], var.delivery_mode)
+    error_message = "delivery_mode must be 'log' or 'chat'."
+  }
+}
+
 variable "manage_domain_restricted_sharing" {
   type        = bool
   default     = true

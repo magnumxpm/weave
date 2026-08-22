@@ -1,5 +1,13 @@
+output "project_id" {
+  value = var.project_id
+}
+
 output "project_number" {
   value = data.google_project.this.number
+}
+
+output "ingestion_url" {
+  value = var.create_cloud_run ? google_cloud_run_v2_service.ingestion[0].uri : ""
 }
 
 output "ingestion_sa_email" {

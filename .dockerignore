@@ -1,0 +1,16 @@
+.venv/
+.git/
+.github/
+dist/
+infra/
+eval/
+samples/
+tests/
+scripts/
+agent/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.adk/
+.env

@@ -19,7 +19,10 @@ from agent.tools.search_related_context_tool import (
 )
 
 
-def create_enrichment_agent(sources: Sequence[ContextSource] | None = None) -> LlmAgent:
+def create_enrichment_agent(
+    sources: Sequence[ContextSource] | None = None,
+    after_model_callback: Callable[..., object] | None = None,
+) -> LlmAgent:
     tool = (
         search_related_context
         if sources is None
@@ -35,13 +38,15 @@ def create_enrichment_agent(sources: Sequence[ContextSource] | None = None) -> L
         output_schema=OwnerItemList.model_json_schema(mode="serialization"),
         include_contents="none",
         before_agent_callback=log_enrichment_scope,
+        after_model_callback=after_model_callback,
     )
 
 
 def make_run_enrichment(
     sources: Sequence[ContextSource] | None = None,
+    after_model_callback: Callable[..., object] | None = None,
 ) -> Callable[[SearchPrincipal, list[ActionItem]], OwnerItemList]:
-    agent = create_enrichment_agent(sources)
+    agent = create_enrichment_agent(sources, after_model_callback)
 
     def run_enrichment(principal: SearchPrincipal, owner_items: list[ActionItem]) -> OwnerItemList:
         runner = InMemoryRunner(agent=agent, app_name="weave_enrichment")

@@ -27,6 +27,20 @@ web:
 demo:
 	uv run python scripts/demo.py --transcript "$(TRANSCRIPT)"
 
+IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
+PROJECT_ID ?= $(shell cd infra && $(TF) output -raw project_id 2>/dev/null)
+REGION ?= us-central1
+
+build-image:
+	gcloud builds submit --project=$(PROJECT_ID) \
+	  --tag=$(REGION)-docker.pkg.dev/$(PROJECT_ID)/weave/ingestion:$(IMAGE_TAG) \
+	  --gcs-source-staging-dir=gs://$(PROJECT_ID)-adk-staging/cloudbuild \
+	  -f services/ingestion/Dockerfile .
+
+deploy-agent:
+	rm -rf dist && uv build --all-packages
+	uv run python agent/deployment/deploy.py
+
 infra-init:
 	cd infra && $(TF) init
 

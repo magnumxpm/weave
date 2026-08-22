@@ -1,0 +1,122 @@
+"""Meet artifact retrieval behind a seam: live Workspace APIs or local fixtures."""
+
+from __future__ import annotations
+
+import logging
+import re
+from abc import ABC, abstractmethod
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from weave_common import Attendee, PipelineRequest, TranscriptTurn
+
+logger = logging.getLogger(__name__)
+
+_CONFERENCE_ID = re.compile(r"conferenceRecords/([A-Za-z0-9_-]+)")
+
+
+def extract_conference_id(payload: str) -> str | None:
+    """Pull the conference record id out of a Workspace Events payload."""
+    match = _CONFERENCE_ID.search(payload)
+    return match.group(1) if match else None
+
+
+class MeetArtifactSource(ABC):
+    @abstractmethod
+    def fetch(self, conference_id: str) -> PipelineRequest:
+        """Return the full pipeline request for a finished conference."""
+
+
+class FixtureMeetArtifactSource(MeetArtifactSource):
+    """Reads `{fixture_dir}/{conference_id}.json` shaped like PipelineRequest.
+
+    This is what `make smoke` exercises: the whole pipeline runs for real with
+    only the Workspace boundary replaced.
+    """
+
+    def __init__(self, fixture_dir: str) -> None:
+        self._dir = Path(fixture_dir)
+
+    def fetch(self, conference_id: str) -> PipelineRequest:
+        path = self._dir / f"{conference_id}.json"
+        return PipelineRequest.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+class LiveMeetArtifactSource(MeetArtifactSource):
+    """Meet REST API v2 with delegated user credentials; full pagination.
+
+    Identity is deterministic: transcript entries carry `participant`, and the
+    participant's signed-in user id resolves to an email via the Directory API.
+    """
+
+    def __init__(self, meet_service: Any, resolve_email: Any) -> None:
+        self._meet = meet_service
+        self._resolve_email = resolve_email
+
+    def _paginate(self, request_fn: Any, key: str, **kwargs: Any) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
+        token: str | None = None
+        while True:
+            response = request_fn(pageToken=token, **kwargs).execute()
+            items.extend(response.get(key, []))
+            token = response.get("nextPageToken")
+            if not token:
+                return items
+
+    def fetch(self, conference_id: str) -> PipelineRequest:
+        record_name = f"conferenceRecords/{conference_id}"
+        record = self._meet.conferenceRecords().get(name=record_name).execute()
+        meeting_date = date.fromisoformat(record["startTime"][:10])
+
+        participants = self._paginate(
+            self._meet.conferenceRecords().participants().list, "participants", parent=record_name
+        )
+        attendees: list[Attendee] = []
+        participant_names: dict[str, Attendee] = {}
+        for participant in participants:
+            signed_in = participant.get("signedinUser")
+            if not signed_in:
+                continue  # anonymous/phone participants can never own an item
+            email = self._resolve_email(signed_in["user"].removeprefix("users/"))
+            attendee = Attendee(
+                email=email,
+                participant_id=participant["name"],
+                display_name=signed_in.get("displayName", email),
+            )
+            attendees.append(attendee)
+            participant_names[participant["name"]] = attendee
+
+        transcripts = self._paginate(
+            self._meet.conferenceRecords().transcripts().list, "transcripts", parent=record_name
+        )
+        if not transcripts:
+            raise LookupError(f"no transcript for {record_name}")
+        entries = self._paginate(
+            self._meet.conferenceRecords().transcripts().entries().list,
+            "transcriptEntries",
+            parent=transcripts[0]["name"],
+        )
+
+        turns = []
+        for index, entry in enumerate(entries):
+            participant_id = entry.get("participant")
+            attendee = participant_names.get(participant_id) if participant_id else None
+            turns.append(
+                TranscriptTurn(
+                    turn_index=index,
+                    participant_id=participant_id,
+                    speaker_name=attendee.display_name if attendee else "Unknown speaker",
+                    text=entry.get("text", ""),
+                )
+            )
+        logger.info(
+            "fetched meet artifacts",
+            extra={"conference_id": conference_id, "turn_count": len(turns)},
+        )
+        return PipelineRequest(
+            transcript_turns=turns,
+            conference_record_id=record_name,
+            meeting_date=meeting_date,
+            attendees=attendees,
+        )

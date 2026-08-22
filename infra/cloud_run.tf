@@ -38,6 +38,27 @@ resource "google_cloud_run_v2_service" "ingestion" {
         name  = "PUBSUB_PUSH_AUDIENCE"
         value = var.pubsub_push_audience
       }
+      env {
+        name  = "MODEL_ARMOR_INPUT_TEMPLATE"
+        value = google_model_armor_template.transcript_input.id
+      }
+      # Swap to live + a real subject once DWD propagation is confirmed.
+      env {
+        name  = "ARTIFACT_SOURCE"
+        value = var.artifact_source
+      }
+      env {
+        name  = "FIXTURE_DIR"
+        value = "/app/services/ingestion/fixtures"
+      }
+      env {
+        name  = "WORKSPACE_SUBJECT"
+        value = var.workspace_subject
+      }
+      env {
+        name  = "DELIVERY_MODE"
+        value = var.delivery_mode
+      }
     }
 
     scaling {

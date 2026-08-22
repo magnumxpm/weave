@@ -7,12 +7,15 @@ requires-python = ">=3.12,<3.13"
 dependencies = [
     "google-adk[eval]==2.5.0",
     "google-cloud-firestore>=2.21.0",
+    "google-cloud-modelarmor>=0.2.0",
     "pyyaml>=6.0.2",
     "weave-common",
 ]
 
 [dependency-groups]
 dev = [
+    "google-cloud-aiplatform[agent-engines]>=1.112.0",
+    "httpx>=0.28.1",
     "pytest>=8.3.5",
     "pytest-asyncio>=0.26.0",
     "ruff>=0.11.0",

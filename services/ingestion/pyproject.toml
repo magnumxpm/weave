@@ -4,8 +4,13 @@ version = "0.1.0"
 description = "Weave ingestion and delivery interfaces"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "fastapi>=0.115.0",
     "google-api-python-client>=2.166.0",
     "google-auth>=2.38.0",
+    "google-cloud-aiplatform[agent-engines]>=1.112.0",
+    "google-cloud-firestore>=2.21.0",
+    "google-cloud-modelarmor>=0.2.0",
+    "uvicorn>=0.34.0",
     "weave-common",
 ]
 

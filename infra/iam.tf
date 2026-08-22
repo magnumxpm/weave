@@ -46,6 +46,20 @@ resource "google_project_iam_member" "agent" {
   member   = google_service_account.agent.member
 }
 
+# Key-less domain-wide delegation: these SAs sign their own DWD assertions via
+# the IAM Credentials API instead of carrying exported keys.
+resource "google_service_account_iam_member" "ingestion_self_signer" {
+  service_account_id = google_service_account.ingestion.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = google_service_account.ingestion.member
+}
+
+resource "google_service_account_iam_member" "subscriptions_self_signer" {
+  service_account_id = google_service_account.subscriptions.name
+  role               = "roles/iam.serviceAccountTokenCreator"
+  member             = google_service_account.subscriptions.member
+}
+
 # The Pub/Sub service agent mints OIDC tokens as the push SA for push deliveries.
 resource "google_service_account_iam_member" "pubsub_token_creator" {
   service_account_id = google_service_account.pubsub_push.name
