@@ -14,7 +14,6 @@ logger = logging.getLogger(__name__)
 
 def _build_service(user_email: str):
     from googleapiclient.discovery import build
-
     from weave_ingestion.google_auth import delegated_credentials
 
     service_account = os.environ["SUBSCRIPTIONS_SA"]
