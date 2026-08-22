@@ -77,13 +77,23 @@ https://admin.google.com/ac/owl/domainwidedelegation → **Add new**, twice:
 
 Propagation takes minutes; `403 unauthorized_client` afterwards means wait.
 
-## 6. Manual: Google Chat app (Cloud Console, correct project selected)
+## 6. Manual: Google Chat app (two separate steps)
 
-APIs & Services → Google Chat API → **Configuration** tab:
+**6a. Configure** (Cloud Console → APIs & Services → Google Chat API →
+**Configuration** tab):
 - App name `Weave`, any HTTPS avatar URL, short description.
 - Interactive features: **off** (v1 sends cards; it never receives).
 - Visibility: make available to your domain (or the test users).
 - Save; app status should read LIVE.
+
+**6b. Install for the organisation** (Admin Console → Apps → Google Workspace →
+Google Chat → Chat apps). Configuring is *not* installing. An
+app-authenticated `spaces.findDirectMessage` returns **404 until a DM space
+exists**, and that space is created when an admin installs the app for the org.
+Skip this and every delivery fails, even though the pipeline ran correctly.
+
+Delivery also resolves each owner's numeric id through the Directory API,
+because Chat only accepts an email alias under end-user auth, never app auth.
 
 ## 7. Deploy the agent (D2)
 
@@ -116,7 +126,14 @@ make infra-pass2 AGENT_ENGINE_ID=<from D2> IMAGE_TAG=$(git rev-parse --short HEA
 
 Pass 2 defaults to `artifact_source=fixture` and `delivery_mode=log`, so the
 whole pipeline is exercisable before Workspace is wired. Switch with
-`-var artifact_source=live -var workspace_subject=<user> -var delivery_mode=chat`.
+`-var artifact_source=live -var delivery_mode=chat -var admin_subject=<admin>`.
+
+`admin_subject` is used **only** for Directory lookups. Meet reads impersonate
+the user whose subscription produced each event, read from the CloudEvent
+source — conference records are visible only to that conference's participants,
+so a single fixed subject would restrict the system to one person's meetings.
+When that id cannot be determined the event fails with the full attribute set
+logged, rather than reading as the wrong account.
 
 Verify:
 ```bash
@@ -176,4 +193,6 @@ participant accepted the prompt.
 | `gcloud builds submit --tag` rejects `-f` | `--tag` mode cannot set a Dockerfile path | use the `cloudbuild.yaml` configs in each service |
 | Terraform/gcloud fail with `invalid_rapt` | Workspace reauth policy expired the session | `gcloud auth login` again |
 | `TARGET_RESOURCE_ACCESS_DENIED` creating a subscription | target must be the numeric Cloud Identity id | see §9 |
+| Chat delivery 404s on every owner | app not installed org-wide, so no DM space exists | see §6b |
+| Meet fetch 403s for another user's meeting | reads must impersonate the subscribing user, not a fixed one | see §8 |
 | A loop variable before `:method` in a URL 404s in zsh | zsh reads `$var:g...` as a history modifier | brace it: `${var}:generateContent` |
