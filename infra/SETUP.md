@@ -85,10 +85,80 @@ APIs & Services → Google Chat API → **Configuration** tab:
 - Visibility: make available to your domain (or the test users).
 - Save; app status should read LIVE.
 
-## 7. Later passes
+## 7. Deploy the agent (D2)
 
-- D2 deploys the agent (`make deploy-agent`), producing `AGENT_ENGINE_ID`.
-- D3: `make infra-pass2 AGENT_ENGINE_ID=... IMAGE_TAG=$(git rev-parse --short HEAD)`
-  adds Cloud Run + the authenticated push subscription.
-- Meet transcription must be ON for test users (Admin Console → Apps → Google
-  Workspace → Google Meet), and note any explicit-consent policy for recordings.
+```bash
+export PROJECT_ID=<PROJECT_ID> REGION=us-central1
+export AGENT_SA=weave-agent-sa@$PROJECT_ID.iam.gserviceaccount.com
+make deploy-agent            # prints AGENT_ENGINE_ID=projects/.../reasoningEngines/N
+```
+
+**Model names are backend-specific.** Agent Engine runs on Vertex, which serves
+a different catalogue than AI Studio: `gemini-3.x` names resolve with an API key
+but 404 on Vertex. `agent/config.py` defaults to `gemini-2.5-flash` and honours
+`WEAVE_MODEL`. Confirm before deploying:
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $(gcloud auth print-access-token)" \
+  -H "Content-Type: application/json" \
+  "https://$REGION-aiplatform.googleapis.com/v1/projects/$PROJECT_ID/locations/$REGION/publishers/google/models/${MODEL}:generateContent" \
+  -d '{"contents":[{"role":"user","parts":[{"text":"ok"}]}]}'
+```
+(Brace the variable — zsh parses a bare `$MODEL:generateContent` as a history
+modifier and silently mangles the URL into a 404.)
+
+## 8. Build and deploy the ingestion service (D3)
+
+```bash
+make build-image             # Cloud Build, sha tag, dedicated weave-build-sa
+make infra-pass2 AGENT_ENGINE_ID=<from D2> IMAGE_TAG=$(git rev-parse --short HEAD)
+```
+
+Pass 2 defaults to `artifact_source=fixture` and `delivery_mode=log`, so the
+whole pipeline is exercisable before Workspace is wired. Switch with
+`-var artifact_source=live -var workspace_subject=<user> -var delivery_mode=chat`.
+
+Verify:
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' -X POST <URL>/pubsub-push   # 403
+gcloud pubsub topics publish meet-artifacts --project=$PROJECT_ID \
+  --message='{"transcript":{"name":"conferenceRecords/smoke-0001/transcripts/t1"}}'
+```
+Expect one `meeting processed` log line, `processed_meetings/<id>.status=delivered`,
+and one `action_items` doc per actionable owner. Re-publishing the same id must
+return 200 without writing again.
+
+## 9. Subscription manager (D4)
+
+```bash
+gcloud builds submit --project=$PROJECT_ID \
+  --config=services/subscription_manager/cloudbuild.yaml \
+  --substitutions=_IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/weave/subscription-manager:$(git rev-parse --short HEAD) \
+  --gcs-source-staging-dir=gs://$PROJECT_ID-adk-staging/cloudbuild \
+  --service-account=projects/$PROJECT_ID/serviceAccounts/weave-build-sa@$PROJECT_ID.iam.gserviceaccount.com .
+
+cd infra && tofu apply -var create_cloud_run=true -var image_tag=<tag> \
+  -var agent_engine_id=<id> -var create_subscription_manager=true \
+  -var subscription_manager_image_tag=<tag> \
+  -var 'onboarded_users=["user@yourdomain"]'
+
+gcloud run jobs execute weave-subscription-manager --region=$REGION --project=$PROJECT_ID
+gcloud scheduler jobs resume weave-subscription-manager --location=$REGION --project=$PROJECT_ID
+```
+
+Meet transcription must be ON for those users (Admin Console → Apps → Google
+Workspace → Google Meet), and check whether the explicit-consent policy for
+transcripts is enabled — if it is, a transcript only exists for meetings where a
+participant accepted the prompt.
+
+## Traps hit while building this (all cost a debugging cycle)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Push 401s at the platform layer, never reaches the container | Cloud Run only accepts an OIDC `aud` that is the service URL | declare `custom_audiences` on the service (already in `cloud_run.tf`) |
+| Handler INFO logs missing in Cloud Logging | root logger defaults to WARNING under uvicorn | `logging_config.configure_logging()` at app creation |
+| Cloud Build 403 on the source tarball | default compute SA has no access to the staging bucket | dedicated `weave-build-sa` (`cloudbuild.tf`) |
+| `gcloud model-armor` 403s despite Owner | Model Armor ignores basic roles and is regional-only | grant `roles/modelarmor.admin`; set the regional `api_endpoint_overrides` |
+| Agent Engine returns "no final response" | model name not on Vertex | see §7 |
+| `gcloud builds submit --tag` rejects `-f` | `--tag` mode cannot set a Dockerfile path | use the `cloudbuild.yaml` configs in each service |
+| Terraform/gcloud fail with `invalid_rapt` | Workspace reauth policy expired the session | `gcloud auth login` again |
