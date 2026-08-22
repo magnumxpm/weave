@@ -23,6 +23,7 @@ from weave_ingestion.delivery.base import Deliverer
 from weave_ingestion.delivery.chat import ChatDeliverer
 from weave_ingestion.delivery.log import LogDeliverer
 from weave_ingestion.firestore_client import MeetingLedger
+from weave_ingestion.logging_config import configure_logging
 from weave_ingestion.meet_client import (
     FixtureMeetArtifactSource,
     MeetArtifactSource,
@@ -173,5 +174,6 @@ def create_app(
 
 def __getattr__(name: str) -> Any:
     if name == "app":  # uvicorn entrypoint; env validation happens right here
+        configure_logging()
         return create_app(settings_from_env())
     raise AttributeError(name)

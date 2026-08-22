@@ -6,6 +6,11 @@ resource "google_cloud_run_v2_service" "ingestion" {
   location = var.region
   ingress  = "INGRESS_TRAFFIC_ALL" # no allUsers binding; OIDC on the push sub is the control
 
+  # Cloud Run rejects any OIDC token whose `aud` is not the service URL unless
+  # that value is declared here. The fixed audience is what breaks the
+  # Terraform self-reference cycle, so it must be registered explicitly.
+  custom_audiences = [var.pubsub_push_audience]
+
   template {
     service_account                  = google_service_account.ingestion.email
     timeout                          = "600s"
