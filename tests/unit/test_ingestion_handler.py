@@ -265,9 +265,7 @@ def test_live_mode_impersonates_the_subscribing_user() -> None:
     )
     client = TestClient(app, raise_server_exceptions=False)
     body = push_body()
-    body["message"]["attributes"] = {
-        "ce-source": "//cloudidentity.googleapis.com/users/424242"
-    }
+    body["message"]["attributes"] = {"ce-source": "//cloudidentity.googleapis.com/users/424242"}
     assert client.post("/pubsub-push", json=body, headers=AUTH).status_code == 200
     # The fetch runs as the subscriber, not as a fixed configured account.
     assert source.subjects == ["user-424242@example.com"]

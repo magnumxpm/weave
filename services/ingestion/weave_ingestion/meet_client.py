@@ -32,9 +32,8 @@ def extract_subscriber_user_id(attributes: dict[str, str], payload: str) -> str 
     searched as a fallback because the attribute name has varied.
     """
     for key in ("ce-source", "source", "ce-subject"):
-        if value := attributes.get(key):
-            if match := _SUBSCRIBER_ID.search(value):
-                return match.group(1)
+        if (value := attributes.get(key)) and (match := _SUBSCRIBER_ID.search(value)):
+            return match.group(1)
     match = _SUBSCRIBER_ID.search(payload)
     return match.group(1) if match else None
 
