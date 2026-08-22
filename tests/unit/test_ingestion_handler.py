@@ -19,6 +19,7 @@ from weave_common import (
 )
 from weave_ingestion.config import Settings
 from weave_ingestion.delivery.base import Deliverer
+from weave_ingestion.firestore_client import OnboardedUser
 from weave_ingestion.main import create_app
 from weave_ingestion.meet_client import (
     MeetArtifactSource,
@@ -81,6 +82,18 @@ def pipeline_result() -> PipelineResult:
     )
 
 
+def two_owner_result() -> PipelineResult:
+    first = pipeline_result()
+    bob_item = first.bundles[0].items[0].item.model_copy(update={"owner_email": "bob@example.com"})
+    bob_bundle = first.bundles[0].model_copy(
+        update={
+            "owner_email": "bob@example.com",
+            "items": [EnrichedActionItem(item=bob_item)],
+        }
+    )
+    return first.model_copy(update={"bundles": [*first.bundles, bob_bundle]})
+
+
 class FakeSource(MeetArtifactSource):
     def __init__(self) -> None:
         self.calls: list[str] = []
@@ -97,6 +110,14 @@ class FakeLedger:
         self.claimed: set[str] = set()
         self.status: dict[str, str] = {}
         self.items: list[dict[str, Any]] = []
+        self.onboarded: dict[str, OnboardedUser] = {
+            "ana@example.com": OnboardedUser(
+                user_id="101", email="ana@example.com", dm_space="spaces/ana"
+            )
+        }
+        self.deliveries: dict[str, dict[str, str]] = {}
+        self.onboarding_writes: list[OnboardedUser] = []
+        self.offboarding_writes: list[dict[str, Any]] = []
 
     def claim_meeting(self, conference_id: str) -> bool:
         if conference_id in self.claimed:
@@ -104,8 +125,31 @@ class FakeLedger:
         self.claimed.add(conference_id)
         return True
 
-    def mark(self, conference_id: str, status: str) -> None:
+    def mark(
+        self,
+        conference_id: str,
+        status: str,
+        deliveries: dict[str, str] | None = None,
+    ) -> None:
         self.status[conference_id] = status
+        if deliveries is not None:
+            self.deliveries[conference_id] = deliveries
+
+    def onboarded_by_email(self) -> dict[str, OnboardedUser]:
+        return self.onboarded
+
+    def upsert_onboarded_user(
+        self, *, user_id: str, email: str, dm_space: str | None
+    ) -> OnboardedUser:
+        user = OnboardedUser(user_id=user_id, email=email, dm_space=dm_space)
+        self.onboarding_writes.append(user)
+        self.onboarded[email.casefold()] = user
+        return user
+
+    def mark_offboarding(
+        self, *, user_id: str, email: str | None = None, dm_space: str | None = None
+    ) -> None:
+        self.offboarding_writes.append({"user_id": user_id, "email": email, "dm_space": dm_space})
 
     def write_action_items(self, conference_id: str, bundles: Any, visible_to: Any) -> None:
         self.items.append({"conference_id": conference_id, "visible_to": visible_to})
@@ -122,11 +166,21 @@ class FakeScreen:
 
 
 class RecordingDeliverer(Deliverer):
-    def __init__(self) -> None:
+    def __init__(self, failures: set[str] | None = None) -> None:
         self.delivered: list[str] = []
+        self.targets: list[OnboardedUser | None] = []
+        self.failures = failures or set()
 
-    def deliver(self, owner_email: str, bundle: EnrichedOwnerBundle) -> str:
+    def deliver(
+        self,
+        owner_email: str,
+        bundle: EnrichedOwnerBundle,
+        target: OnboardedUser | None = None,
+    ) -> str:
+        if owner_email in self.failures:
+            raise RuntimeError("Chat unavailable")
         self.delivered.append(owner_email)
+        self.targets.append(target)
         return f"fake:{owner_email}"
 
 
@@ -137,15 +191,40 @@ def push_body(conference_id: str = "abc123") -> dict[str, Any]:
     return {"message": {"data": base64.b64encode(payload.encode()).decode(), "attributes": {}}}
 
 
+def chat_push_body(payload: dict[str, Any]) -> dict[str, Any]:
+    encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+    return {"message": {"data": encoded}}
+
+
+def chat_event(event_type: str, *, include_email: bool = True) -> dict[str, Any]:
+    user: dict[str, Any] = {"name": "users/303"}
+    if include_email:
+        user["email"] = "chat-user@example.com"
+    return {
+        "type": event_type,
+        "user": user,
+        "space": {
+            "name": "spaces/chat-user",
+            "spaceType": "DIRECT_MESSAGE",
+            "singleUserBotDm": True,
+        },
+    }
+
+
 def build(
     *,
     screen: FakeScreen | None = None,
     run_pipeline: Any = None,
     verifier: Any = None,
+    ledger: FakeLedger | None = None,
+    deliverer: RecordingDeliverer | None = None,
+    trigger_sweep: Any = None,
+    welcome_sender: Any = None,
+    resolve_subject_email: Any = None,
 ) -> tuple[TestClient, FakeSource, FakeLedger, RecordingDeliverer, FakeScreen]:
     source = FakeSource()
-    ledger = FakeLedger()
-    deliverer = RecordingDeliverer()
+    ledger = ledger or FakeLedger()
+    deliverer = deliverer or RecordingDeliverer()
     screen = screen or FakeScreen()
     app = create_app(
         settings(),
@@ -155,6 +234,9 @@ def build(
         screen=screen,  # type: ignore[arg-type]
         run_pipeline=run_pipeline or (lambda request: pipeline_result()),
         token_verifier=verifier or (lambda token: {"email": "push@test.iam.gserviceaccount.com"}),
+        trigger_sweep=trigger_sweep or (lambda: None),
+        welcome_sender=welcome_sender or (lambda user: None),
+        resolve_subject_email=resolve_subject_email,
     )
     client = TestClient(app, raise_server_exceptions=False)
     return client, source, ledger, deliverer, screen
@@ -170,8 +252,47 @@ def test_happy_path_delivers_writes_and_acks() -> None:
     assert source.calls == ["abc123"]
     assert deliverer.delivered == ["ana@example.com"]
     assert ledger.status["abc123"] == "delivered"
+    assert ledger.deliveries["abc123"] == {"ana@example.com": "delivered"}
     assert ledger.items[0]["visible_to"] == ["ana@example.com", "bob@example.com"]
     assert screen.texts == ["hello"]
+
+
+def test_not_onboarded_owner_is_skipped_but_items_are_written() -> None:
+    ledger = FakeLedger()
+    ledger.onboarded.clear()
+    client, _, ledger, deliverer, _ = build(ledger=ledger)
+
+    response = client.post("/pubsub-push", json=push_body(), headers=AUTH)
+
+    assert response.status_code == 200
+    assert deliverer.delivered == []
+    assert ledger.items
+    assert ledger.status["abc123"] == "delivered"
+    assert ledger.deliveries["abc123"] == {"ana@example.com": "skipped_not_onboarded"}
+
+
+def test_one_delivery_failure_does_not_block_another_owner() -> None:
+    ledger = FakeLedger()
+    ledger.onboarded["bob@example.com"] = OnboardedUser(
+        user_id="202", email="bob@example.com", dm_space="spaces/bob"
+    )
+    deliverer = RecordingDeliverer(failures={"ana@example.com"})
+    client, _, ledger, deliverer, _ = build(
+        ledger=ledger,
+        deliverer=deliverer,
+        run_pipeline=lambda request: two_owner_result(),
+    )
+
+    response = client.post("/pubsub-push", json=push_body(), headers=AUTH)
+
+    assert response.status_code == 200
+    assert deliverer.delivered == ["bob@example.com"]
+    assert ledger.status["abc123"] == "delivered_partial"
+    assert ledger.deliveries["abc123"] == {
+        "ana@example.com": "delivery_failed",
+        "bob@example.com": "delivered",
+    }
+    assert ledger.items
 
 
 def test_duplicate_event_is_acked_without_processing() -> None:
@@ -289,3 +410,120 @@ def test_live_mode_without_a_subscriber_id_fails_rather_than_guessing() -> None:
     assert response.status_code == 500
     assert ledger.status["abc123"] == "failed"
     assert source.calls == []
+
+
+def test_chat_added_event_onboards_triggers_and_sends_welcome() -> None:
+    calls: list[str] = []
+    welcomed: list[OnboardedUser] = []
+    client, _, ledger, _, _ = build(
+        trigger_sweep=lambda: calls.append("triggered"),
+        welcome_sender=welcomed.append,
+    )
+
+    response = client.post(
+        "/chat-events",
+        json=chat_push_body(chat_event("ADDED_TO_SPACE")),
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    assert calls == ["triggered"]
+    assert ledger.onboarding_writes == [
+        OnboardedUser(
+            user_id="303",
+            email="chat-user@example.com",
+            dm_space="spaces/chat-user",
+        )
+    ]
+    assert welcomed == ledger.onboarding_writes
+
+
+def test_chat_added_event_resolves_missing_email() -> None:
+    client, _, ledger, _, _ = build(
+        resolve_subject_email=lambda user_id: f"resolved-{user_id}@example.com"
+    )
+    response = client.post(
+        "/chat-events",
+        json=chat_push_body(chat_event("ADDED_TO_SPACE", include_email=False)),
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert ledger.onboarding_writes[0].email == "resolved-303@example.com"
+
+
+def test_chat_removed_event_writes_tombstone_and_triggers() -> None:
+    calls: list[str] = []
+    client, _, ledger, _, _ = build(trigger_sweep=lambda: calls.append("triggered"))
+    response = client.post(
+        "/chat-events",
+        json=chat_push_body(chat_event("REMOVED_FROM_SPACE")),
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert calls == ["triggered"]
+    assert ledger.offboarding_writes == [
+        {
+            "user_id": "303",
+            "email": "chat-user@example.com",
+            "dm_space": "spaces/chat-user",
+        }
+    ]
+
+
+def test_unknown_and_malformed_chat_events_are_acked_without_writes() -> None:
+    client, _, ledger, _, _ = build()
+    unknown = client.post(
+        "/chat-events",
+        json=chat_push_body({"type": "MESSAGE"}),
+        headers=AUTH,
+    )
+    malformed = client.post("/chat-events", json={"message": {"data": "not-base64"}}, headers=AUTH)
+    assert unknown.status_code == 200
+    assert malformed.status_code == 200
+    assert ledger.onboarding_writes == []
+    assert ledger.offboarding_writes == []
+
+
+def test_chat_event_bad_oidc_is_rejected() -> None:
+    def rejecting(token: str) -> dict[str, Any]:
+        raise PushAuthError("bad")
+
+    client, _, ledger, _, _ = build(verifier=rejecting)
+    response = client.post(
+        "/chat-events",
+        json=chat_push_body(chat_event("ADDED_TO_SPACE")),
+        headers=AUTH,
+    )
+    assert response.status_code == 403
+    assert ledger.onboarding_writes == []
+
+
+def test_chat_job_trigger_failure_retries_without_welcome() -> None:
+    welcomed: list[OnboardedUser] = []
+
+    def fail() -> None:
+        raise RuntimeError("Run API unavailable")
+
+    client, _, ledger, _, _ = build(trigger_sweep=fail, welcome_sender=welcomed.append)
+    response = client.post(
+        "/chat-events",
+        json=chat_push_body(chat_event("ADDED_TO_SPACE")),
+        headers=AUTH,
+    )
+    assert response.status_code == 500
+    assert ledger.onboarding_writes
+    assert welcomed == []
+
+
+def test_welcome_failure_does_not_roll_back_onboarding() -> None:
+    def fail(user: OnboardedUser) -> None:
+        raise RuntimeError("Chat unavailable")
+
+    client, _, ledger, _, _ = build(welcome_sender=fail)
+    response = client.post(
+        "/chat-events",
+        json=chat_push_body(chat_event("ADDED_TO_SPACE")),
+        headers=AUTH,
+    )
+    assert response.status_code == 200
+    assert ledger.onboarding_writes

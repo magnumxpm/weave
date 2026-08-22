@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from weave_subscriptions.manager import EVENT_TYPE, ensure_subscription, run
+from weave_ingestion.firestore_client import OnboardedUser
+from weave_subscriptions.manager import EVENT_TYPE, delete_subscriptions, ensure_subscription, run
 
 NOW = datetime(2026, 8, 22, tzinfo=UTC)
 TOPIC = "projects/p/topics/meet-artifacts"
@@ -11,19 +12,24 @@ USER_ID = "112655489411114378906"
 
 
 class FakeRequest:
-    def __init__(self, response: Any) -> None:
+    def __init__(self, response: Any = None, error: Exception | None = None) -> None:
         self._response = response
+        self._error = error
 
     def execute(self) -> Any:
+        if self._error:
+            raise self._error
         return self._response
 
 
 class FakeSubscriptions:
-    def __init__(self, existing: list[dict[str, Any]]) -> None:
+    def __init__(self, existing: list[dict[str, Any]], *, delete_fails: bool = False) -> None:
         self.existing = existing
         self.created: list[dict[str, Any]] = []
         self.reactivated: list[str] = []
         self.filters: list[str] = []
+        self.deleted: list[str] = []
+        self.delete_fails = delete_fails
 
     def list(self, *, filter: str) -> FakeRequest:
         self.filters.append(filter)
@@ -37,10 +43,20 @@ class FakeSubscriptions:
         self.reactivated.append(name)
         return FakeRequest({"name": name})
 
+    def delete(self, *, name: str) -> FakeRequest:
+        self.deleted.append(name)
+        error = RuntimeError("delete failed") if self.delete_fails else None
+        return FakeRequest({}, error)
+
 
 class FakeService:
-    def __init__(self, existing: list[dict[str, Any]] | None = None) -> None:
-        self.subscription_service = FakeSubscriptions(existing or [])
+    def __init__(
+        self,
+        existing: list[dict[str, Any]] | None = None,
+        *,
+        delete_fails: bool = False,
+    ) -> None:
+        self.subscription_service = FakeSubscriptions(existing or [], delete_fails=delete_fails)
 
     def subscriptions(self) -> FakeSubscriptions:
         return self.subscription_service
@@ -94,31 +110,91 @@ def test_deleted_subscription_is_replaced_not_reused() -> None:
     assert ensure_subscription(service, USER_ID, TOPIC, NOW).action == "created"
 
 
+def active_user(user_id: str = USER_ID, email: str = "user@example.com") -> OnboardedUser:
+    return OnboardedUser(user_id=user_id, email=email, status="active")
+
+
+def offboarding_user() -> OnboardedUser:
+    return OnboardedUser(
+        user_id=USER_ID,
+        email="user@example.com",
+        dm_space="spaces/dm",
+        status="offboarding",
+    )
+
+
 def test_one_user_failure_does_not_stop_the_sweep() -> None:
     broken, working = "999", USER_ID
 
-    def build(user: str) -> Any:
-        if user == broken:
+    def build(email: str) -> Any:
+        if email == "broken@example.com":
             raise RuntimeError("delegation denied")
         return FakeService()
 
-    outcomes = run([broken, working], TOPIC, build, NOW)
+    outcomes = run(
+        [active_user(broken, "broken@example.com"), active_user(working)],
+        TOPIC,
+        build,
+        NOW,
+    )
     actions = {outcome.user: outcome.action for outcome in outcomes}
     assert actions == {broken: "failed", working: "created"}
 
 
-def test_email_without_a_resolver_fails_that_user_only() -> None:
-    outcomes = run(["someone@example.com", USER_ID], TOPIC, lambda user: FakeService(), NOW)
-    actions = {outcome.user: outcome.action for outcome in outcomes}
-    assert actions["someone@example.com"] == "failed"
-    assert actions[USER_ID] == "created"
-
-
-def test_email_is_resolved_to_a_numeric_id_when_a_resolver_exists() -> None:
+def test_service_impersonation_uses_email_while_target_uses_numeric_id() -> None:
     service = FakeService()
-    outcomes = run(
-        ["someone@example.com"], TOPIC, lambda user: service, NOW, resolve_user_id=lambda e: USER_ID
-    )
+    subjects: list[str] = []
+
+    def build(email: str) -> FakeService:
+        subjects.append(email)
+        return service
+
+    outcomes = run([active_user(email="someone@example.com")], TOPIC, build, NOW)
     assert outcomes[0].action == "created"
+    assert subjects == ["someone@example.com"]
     target = service.subscription_service.created[0]["targetResource"]
     assert target == f"//cloudidentity.googleapis.com/users/{USER_ID}"
+
+
+def test_delete_subscriptions_removes_every_live_match() -> None:
+    service = FakeService(
+        [
+            expiring_in(5),
+            expiring_in(4) | {"name": "subscriptions/second"},
+            expiring_in(3) | {"name": "subscriptions/gone", "state": "DELETED"},
+        ]
+    )
+    outcome = delete_subscriptions(service, USER_ID)
+    assert outcome.action == "deleted"
+    assert service.subscription_service.deleted == [
+        "subscriptions/existing",
+        "subscriptions/second",
+    ]
+
+
+def test_offboarding_deletes_subscription_then_document() -> None:
+    service = FakeService([expiring_in(5)])
+    deleted_documents: list[str] = []
+    outcomes = run(
+        [offboarding_user()],
+        TOPIC,
+        lambda email: service,
+        NOW,
+        delete_onboarded=deleted_documents.append,
+    )
+    assert outcomes[0].action == "deleted"
+    assert deleted_documents == [USER_ID]
+
+
+def test_offboarding_failure_keeps_tombstone() -> None:
+    service = FakeService([expiring_in(5)], delete_fails=True)
+    deleted_documents: list[str] = []
+    outcomes = run(
+        [offboarding_user()],
+        TOPIC,
+        lambda email: service,
+        NOW,
+        delete_onboarded=deleted_documents.append,
+    )
+    assert outcomes[0].action == "failed"
+    assert deleted_documents == []

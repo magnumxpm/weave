@@ -39,12 +39,6 @@ variable "subscription_manager_image_tag" {
   description = "Git-sha image tag for the subscription manager job."
 }
 
-variable "onboarded_users" {
-  type        = list(string)
-  default     = []
-  description = "Workspace users whose Meet transcripts Weave subscribes to."
-}
-
 variable "artifact_source" {
   type        = string
   default     = "fixture"

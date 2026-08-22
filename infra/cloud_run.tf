@@ -70,6 +70,12 @@ resource "google_cloud_run_v2_service" "ingestion" {
         name  = "DELIVERY_MODE"
         value = var.delivery_mode
       }
+      env {
+        name = "SUBSCRIPTION_JOB_NAME"
+        value = var.create_subscription_manager ? (
+          "projects/${var.project_id}/locations/${var.region}/jobs/${google_cloud_run_v2_job.subscription_manager[0].name}"
+        ) : ""
+      }
     }
 
     scaling {

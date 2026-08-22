@@ -14,10 +14,6 @@ resource "google_cloud_run_v2_job" "subscription_manager" {
         image = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.weave.repository_id}/subscription-manager:${var.subscription_manager_image_tag}"
 
         env {
-          name  = "ONBOARDED_USERS"
-          value = join(",", var.onboarded_users)
-        }
-        env {
           name  = "MEET_TOPIC"
           value = google_pubsub_topic.meet_artifacts.id
         }
@@ -44,4 +40,13 @@ resource "google_cloud_run_v2_job_iam_member" "scheduler_invoker" {
   location = var.region
   role     = "roles/run.invoker"
   member   = google_service_account.subscriptions.member
+}
+
+# Chat onboarding submits an immediate sweep, but cannot alter job settings.
+resource "google_cloud_run_v2_job_iam_member" "ingestion_invoker" {
+  count    = var.create_subscription_manager ? 1 : 0
+  name     = google_cloud_run_v2_job.subscription_manager[0].name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = google_service_account.ingestion.member
 }

@@ -77,23 +77,33 @@ https://admin.google.com/ac/owl/domainwidedelegation → **Add new**, twice:
 
 Propagation takes minutes; `403 unauthorized_client` afterwards means wait.
 
-## 6. Manual: Google Chat app (two separate steps)
+## 6. Manual: Google Chat app
 
 **6a. Configure** (Cloud Console → APIs & Services → Google Chat API →
 **Configuration** tab):
 - App name `Weave`, any HTTPS avatar URL, short description.
-- Interactive features: **off** (v1 sends cards; it never receives).
-- Visibility: make available to your domain (or the test users).
+- Interactive features: **on**; allow direct messages.
+- Connection settings: **Cloud Pub/Sub topic**, using the
+  `chat_events_topic` Terraform output.
+- Visibility: make the internal app discoverable throughout the Workspace
+  domain (or a test group during rollout).
 - Save; app status should read LIVE.
 
-**6b. Install for the organisation** (Admin Console → Apps → Google Workspace →
-Google Chat → Chat apps). Configuring is *not* installing. An
-app-authenticated `spaces.findDirectMessage` returns **404 until a DM space
-exists**, and that space is created when an admin installs the app for the org.
-Skip this and every delivery fails, even though the pipeline ran correctly.
+**6b. User onboarding.** Availability and installation are intentionally
+different. Each user chooses Chat → New chat → Weave and adds the app. The
+`ADDED_TO_SPACE` event stores that user's numeric id and exact DM space in
+Firestore, then submits an immediate subscription-manager sweep. A welcome card
+confirms that provisioning was queued.
 
-Delivery also resolves each owner's numeric id through the Directory API,
-because Chat only accepts an email alias under end-user auth, never app auth.
+Do not force-install the app across the organisation for self-serve mode:
+managed users might not be able to remove it themselves. If this deployment was
+previously managed-installed, enable and verify the event endpoint first, then
+remove the managed installation and have existing users add Weave individually.
+An administrator-managed install remains a bulk-onboarding alternative, but it
+has different offboarding semantics.
+
+The Chat install is only an opt-in signal. Domain-wide delegation remains the
+authority used to read Meet data; adding the app grants no new data permissions.
 
 ## 7. Deploy the agent (D2)
 
@@ -145,36 +155,44 @@ Expect one `meeting processed` log line, `processed_meetings/<id>.status=deliver
 and one `action_items` doc per actionable owner. Re-publishing the same id must
 return 200 without writing again.
 
-## 9. Subscription manager (D4)
+When rolling out the delivery gate before Chat events, seed every currently
+served user before deploying the new ingestion image:
 
 ```bash
-gcloud builds submit --project=$PROJECT_ID \
-  --config=services/subscription_manager/cloudbuild.yaml \
-  --substitutions=_IMAGE=$REGION-docker.pkg.dev/$PROJECT_ID/weave/subscription-manager:$(git rev-parse --short HEAD) \
-  --gcs-source-staging-dir=gs://$PROJECT_ID-adk-staging/cloudbuild \
-  --service-account=projects/$PROJECT_ID/serviceAccounts/weave-build-sa@$PROJECT_ID.iam.gserviceaccount.com .
+make onboard EMAIL=user@yourdomain USER_ID=<numeric-id> DM_SPACE=spaces/<id>
+```
+
+Without that migration, action-item history is still written but Chat delivery
+is intentionally recorded as `skipped_not_onboarded`.
+
+## 9. Subscription manager and onboarding
+
+```bash
+make build-subscription-image
 
 cd infra && tofu apply -var create_cloud_run=true -var image_tag=<tag> \
   -var agent_engine_id=<id> -var create_subscription_manager=true \
-  -var subscription_manager_image_tag=<tag> \
-  -var 'onboarded_users=["user@yourdomain"]'
+  -var subscription_manager_image_tag=<tag>
 
 gcloud run jobs execute weave-subscription-manager --region=$REGION --project=$PROJECT_ID
 gcloud scheduler jobs resume weave-subscription-manager --location=$REGION --project=$PROJECT_ID
 ```
 
-`onboarded_users` takes **numeric Cloud Identity ids**, not emails: the Meet
-backend rejects both an email address and the literal `me` with
-`TARGET_RESOURCE_ACCESS_DENIED`. Get a user's id without any special access:
+The job reads `onboarded_users` from Firestore. Active documents are reconciled
+to live Meet transcript subscriptions; `offboarding` tombstones cause the job
+to delete subscriptions before deleting the document. One user's failure does
+not block the rest and leaves their record for the next scheduled sweep.
+
+The Chat event supplies the numeric Cloud Identity id. For emergency/manual
+recovery only, seed a user with:
 
 ```bash
-curl -s -H "Authorization: Bearer $(gcloud auth print-access-token)" \
-  https://openidconnect.googleapis.com/v1/userinfo    # "sub" is the id
+make onboard EMAIL=user@yourdomain USER_ID=<numeric-id> DM_SPACE=spaces/<id>
 ```
 
-To list emails instead, add `https://www.googleapis.com/auth/admin.directory.user.readonly`
-to the subscriptions SA's delegation entry and pass a resolver; numeric ids need
-only the Meet scope.
+The subscription manager impersonates the stored email through DWD while using
+the numeric id as the Workspace Events target. The Meet backend rejects an
+email target and the literal `me` with `TARGET_RESOURCE_ACCESS_DENIED`.
 
 Meet transcription must be ON for those users (Admin Console → Apps → Google
 Workspace → Google Meet), and check whether the explicit-consent policy for
@@ -193,6 +211,9 @@ participant accepted the prompt.
 | `gcloud builds submit --tag` rejects `-f` | `--tag` mode cannot set a Dockerfile path | use the `cloudbuild.yaml` configs in each service |
 | Terraform/gcloud fail with `invalid_rapt` | Workspace reauth policy expired the session | `gcloud auth login` again |
 | `TARGET_RESOURCE_ACCESS_DENIED` creating a subscription | target must be the numeric Cloud Identity id | see §9 |
-| Chat delivery 404s on every owner | app not installed org-wide, so no DM space exists | see §6b |
+| User can find Weave but is never onboarded | Chat interactive features or the Pub/Sub connection is not enabled | see §6a; inspect `chat-events-push` |
+| Group-space add does not onboard anyone | v1 intentionally accepts direct-message installs only | add Weave through New chat |
+| Offboarding document remains present | subscription deletion failed, so the tombstone is retained for retry | inspect the subscription-manager execution logs |
+| Chat delivery uses Directory or 404s | legacy/manual onboarding record has no `dm_space` | reinstall Weave or repair it with `make onboard` |
 | Meet fetch 403s for another user's meeting | reads must impersonate the subscribing user, not a fixed one | see §8 |
 | A loop variable before `:method` in a URL 404s in zsh | zsh reads `$var:g...` as a history modifier | brace it: `${var}:generateContent` |

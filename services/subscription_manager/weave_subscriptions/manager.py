@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from weave_ingestion.firestore_client import OnboardedUser
+
 logger = logging.getLogger(__name__)
 
 EVENT_TYPE = "google.workspace.meet.transcript.v2.fileGenerated"
@@ -23,7 +25,7 @@ RENEW_WHEN_REMAINING_BELOW = 0.25  # fraction of the original TTL
 @dataclass(frozen=True)
 class SubscriptionOutcome:
     user: str
-    action: str  # created | renewed | current | failed
+    action: str  # created | renewed | current | deleted | absent | failed
     detail: str = ""
 
 
@@ -85,33 +87,46 @@ def ensure_subscription(
     return SubscriptionOutcome(user_id, "current", subscription.get("expireTime", ""))
 
 
+def delete_subscriptions(service: Any, user_id: str) -> SubscriptionOutcome:
+    """Delete every live transcript subscription visible to the delegated user."""
+    if not is_numeric_id(user_id):
+        raise ValueError(f"expected a numeric Cloud Identity id, got {user_id!r}")
+    existing = (
+        service.subscriptions()
+        .list(filter=f'event_types:"{EVENT_TYPE}"')
+        .execute()
+        .get("subscriptions", [])
+    )
+    live = [subscription for subscription in existing if subscription.get("state") != "DELETED"]
+    for subscription in live:
+        service.subscriptions().delete(name=subscription["name"]).execute()
+    names = ",".join(subscription["name"] for subscription in live)
+    return SubscriptionOutcome(user_id, "deleted" if live else "absent", names)
+
+
 def run(
-    users: list[str],
+    users: list[OnboardedUser],
     topic: str,
     build_service: Any,
     now: datetime | None = None,
-    resolve_user_id: Any = None,
+    delete_onboarded: Any = None,
 ) -> list[SubscriptionOutcome]:
-    """Process every user; one user's failure never blocks the rest.
-
-    Entries may be numeric Cloud Identity ids or email addresses. Emails need
-    `resolve_user_id`, which requires the Directory scope on this service
-    account's delegation; numeric ids work with the Meet scope alone.
-    """
+    """Reconcile every Firestore onboarding record independently."""
     outcomes: list[SubscriptionOutcome] = []
     for user in users:
         try:
-            user_id = user if is_numeric_id(user) else None
-            if user_id is None:
-                if resolve_user_id is None:
-                    raise ValueError(
-                        f"{user} is an email but no directory resolver is configured; "
-                        "grant admin.directory.user.readonly to this service account's "
-                        "delegation or list the numeric id instead"
-                    )
-                user_id = resolve_user_id(user)
-            outcomes.append(ensure_subscription(build_service(user), user_id, topic, now))
+            if not user.email:
+                raise ValueError(f"onboarding record {user.user_id} has no email")
+            service = build_service(user.email)
+            if user.status == "active":
+                outcome = ensure_subscription(service, user.user_id, topic, now)
+            else:
+                outcome = delete_subscriptions(service, user.user_id)
+                if delete_onboarded is None:
+                    raise ValueError("delete_onboarded callback is required for offboarding")
+                delete_onboarded(user.user_id)
+            outcomes.append(outcome)
         except Exception as error:  # noqa: BLE001 - a broken user must not stop the sweep
-            logger.exception("subscription sweep failed for user", extra={"user": user})
-            outcomes.append(SubscriptionOutcome(user, "failed", str(error)))
+            logger.exception("subscription sweep failed for user", extra={"user_id": user.user_id})
+            outcomes.append(SubscriptionOutcome(user.user_id, "failed", str(error)))
     return outcomes

@@ -1,9 +1,9 @@
 """Synchronous Pub/Sub push handler: the entire pipeline runs inside one request.
 
 Flow (build plan v2): verify OIDC → claim meeting (idempotency lease) → fetch
-artifacts → Model Armor input → Agent Engine pipeline → deliver per owner →
-write action items → mark delivered. Any exception marks `failed` and returns
-500 so Pub/Sub retries, then dead-letters after five attempts.
+artifacts → Model Armor input → Agent Engine pipeline → isolate delivery per
+owner → write action items → mark delivered. Retryable processing exceptions
+mark `failed`; owner delivery exceptions are recorded and acknowledged.
 """
 
 from __future__ import annotations
@@ -11,18 +11,21 @@ from __future__ import annotations
 import base64
 import json
 import logging
+from collections import Counter
 from collections.abc import Callable
 from typing import Any
+from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import FastAPI, Request, Response
 from weave_common import PipelineRequest, PipelineResult
 
 from weave_ingestion.agent_client import AgentEngineClient
+from weave_ingestion.chat_events import parse_chat_event
 from weave_ingestion.config import Settings, settings_from_env
 from weave_ingestion.delivery.base import Deliverer
 from weave_ingestion.delivery.chat import ChatDeliverer
 from weave_ingestion.delivery.log import LogDeliverer
-from weave_ingestion.firestore_client import MeetingLedger
+from weave_ingestion.firestore_client import MeetingLedger, OnboardedUser
 from weave_ingestion.logging_config import configure_logging
 from weave_ingestion.meet_client import (
     FixtureMeetArtifactSource,
@@ -37,6 +40,8 @@ logger = logging.getLogger(__name__)
 
 TokenVerifier = Callable[[str], dict[str, Any]]
 RunPipeline = Callable[[PipelineRequest], PipelineResult]
+TriggerSweep = Callable[[], None]
+WelcomeSender = Callable[[OnboardedUser], None]
 
 
 DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.user.readonly"
@@ -72,15 +77,80 @@ def _build_live_source(settings: Settings, directory) -> MeetArtifactSource:
     return LiveMeetArtifactSource(build_meet_service, directory.email_for_user_id)
 
 
-def _build_chat_deliverer(directory) -> Deliverer:
+def _build_chat_client():
     from google.auth import default as default_credentials
     from googleapiclient.discovery import build
 
     credentials, _ = default_credentials(scopes=["https://www.googleapis.com/auth/chat.bot"])
-    client = build("chat", "v1", credentials=credentials)
+    return build("chat", "v1", credentials=credentials)
+
+
+def _build_chat_deliverer(directory) -> Deliverer:
+    client = _build_chat_client()
     # App-authenticated Chat calls cannot use an email alias, so resolve the
     # owner's numeric id through the directory.
     return ChatDeliverer(client, lambda email: f"users/{directory.user_id_for_email(email)}")
+
+
+def _build_sweep_trigger(settings: Settings) -> TriggerSweep:
+    def trigger() -> None:
+        if not settings.subscription_job_name:
+            raise RuntimeError("SUBSCRIPTION_JOB_NAME is required for Chat onboarding")
+        from google.cloud import run_v2
+
+        # Starting the job returns a long-running operation. Deliberately do
+        # not call result(): onboarding only waits for execution submission.
+        run_v2.JobsClient().run_job(name=settings.subscription_job_name)
+
+    return trigger
+
+
+def _build_welcome_sender() -> WelcomeSender:
+    client = None
+
+    def send(user: OnboardedUser) -> None:
+        nonlocal client
+        if not user.dm_space:
+            return
+        client = client or _build_chat_client()
+        request_id = str(uuid5(NAMESPACE_URL, f"weave:{user.user_id}:{user.dm_space}"))
+        body = {
+            "cardsV2": [
+                {
+                    "cardId": "weave-welcome",
+                    "card": {
+                        "header": {"title": "Weave is ready"},
+                        "sections": [
+                            {
+                                "widgets": [
+                                    {
+                                        "textParagraph": {
+                                            "text": (
+                                                "Your Meet action items will appear here after "
+                                                "transcription is complete."
+                                            )
+                                        }
+                                    }
+                                ]
+                            }
+                        ],
+                    },
+                }
+            ]
+        }
+        (
+            client.spaces()
+            .messages()
+            .create(
+                parent=user.dm_space,
+                body=body,
+                messageId="client-weave-welcome-v1",
+                requestId=request_id,
+            )
+            .execute()
+        )
+
+    return send
 
 
 def create_app(
@@ -93,6 +163,8 @@ def create_app(
     run_pipeline: RunPipeline | None = None,
     token_verifier: TokenVerifier | None = None,
     resolve_subject_email: Callable[[str], str] | None = None,
+    trigger_sweep: TriggerSweep | None = None,
+    welcome_sender: WelcomeSender | None = None,
 ) -> FastAPI:
     """Wire the handler; every collaborator is injectable for hermetic tests."""
     directory = None
@@ -129,7 +201,22 @@ def create_app(
                 expected_sa=settings.pubsub_push_sa,
             )
 
+    trigger_sweep = trigger_sweep or _build_sweep_trigger(settings)
+    welcome_sender = welcome_sender or _build_welcome_sender()
+
     app = FastAPI()
+
+    def authorize(request: Request) -> bool:
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            return False
+        try:
+            token_verifier(token)
+        except PushAuthError as error:
+            logger.warning("rejected push", extra={"reason": str(error)})
+            return False
+        return True
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
@@ -137,14 +224,7 @@ def create_app(
 
     @app.post("/pubsub-push")
     async def pubsub_push(request: Request) -> Response:
-        authorization = request.headers.get("authorization", "")
-        scheme, _, token = authorization.partition(" ")
-        if scheme.lower() != "bearer" or not token:
-            return Response(status_code=403)
-        try:
-            token_verifier(token)
-        except PushAuthError as error:
-            logger.warning("rejected push", extra={"reason": str(error)})
+        if not authorize(request):
             return Response(status_code=403)
 
         body = await request.json()
@@ -190,26 +270,107 @@ def create_app(
                 return Response(status_code=200)
 
             result = run_pipeline(pipeline_request)
+            onboarded = ledger.onboarded_by_email()
+            delivery_outcomes: dict[str, str] = {}
             for bundle in result.bundles:
-                deliverer.deliver(bundle.owner_email, bundle)
+                owner = bundle.owner_email
+                target = onboarded.get(owner.strip().casefold())
+                if target is None:
+                    delivery_outcomes[owner] = "skipped_not_onboarded"
+                    continue
+                try:
+                    deliverer.deliver(owner, bundle, target)
+                    delivery_outcomes[owner] = "delivered"
+                except Exception:  # noqa: BLE001 - isolate one owner's delivery
+                    logger.exception(
+                        "delivery failed",
+                        extra={"conference_id": conference_id, "owner_email": owner},
+                    )
+                    delivery_outcomes[owner] = "delivery_failed"
             ledger.write_action_items(
                 conference_id,
                 result.bundles,
                 visible_to=[attendee.email for attendee in pipeline_request.attendees],
             )
-            ledger.mark(conference_id, "delivered")
+            status = (
+                "delivered_partial"
+                if "delivery_failed" in delivery_outcomes.values()
+                else "delivered"
+            )
+            ledger.mark(conference_id, status, delivery_outcomes)
+            outcome_counts = Counter(delivery_outcomes.values())
             logger.info(
                 "meeting processed",
                 extra={
                     "conference_id": conference_id,
                     "owner_count": len(result.bundles),
                     "dropped_item_count": result.dropped_item_count,
+                    "delivery_outcomes": dict(outcome_counts),
                 },
             )
             return Response(status_code=200)
         except Exception:
             logger.exception("processing failed", extra={"conference_id": conference_id})
             ledger.mark(conference_id, "failed")
+            return Response(status_code=500)
+
+    @app.post("/chat-events")
+    async def chat_events(request: Request) -> Response:
+        if not authorize(request):
+            return Response(status_code=403)
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise TypeError("Pub/Sub body must be an object")
+            message = body.get("message") or {}
+            if not isinstance(message, dict):
+                raise TypeError("Pub/Sub message must be an object")
+            encoded = message.get("data", "")
+            if not isinstance(encoded, str):
+                raise TypeError("Pub/Sub data must be base64 text")
+            decoded = base64.b64decode(encoded, validate=True).decode("utf-8", errors="strict")
+            event = parse_chat_event(json.loads(decoded))
+        except (ValueError, TypeError, json.JSONDecodeError):
+            logger.warning("malformed Chat event acked")
+            return Response(status_code=200)
+        if event is None:
+            return Response(status_code=200)
+
+        try:
+            email = event.email
+            if email is None:
+                if resolve_subject_email is None:
+                    raise LookupError("cannot resolve Chat user email")
+                email = resolve_subject_email(event.user_id)
+
+            if event.kind == "added":
+                user = ledger.upsert_onboarded_user(
+                    user_id=event.user_id,
+                    email=email or "",
+                    dm_space=event.space_name,
+                )
+                trigger_sweep()
+                try:
+                    welcome_sender(user)
+                except Exception:  # noqa: BLE001 - confirmation is best-effort
+                    logger.exception("welcome delivery failed", extra={"user_id": event.user_id})
+            else:
+                ledger.mark_offboarding(
+                    user_id=event.user_id,
+                    email=email,
+                    dm_space=event.space_name,
+                )
+                trigger_sweep()
+
+            logger.info(
+                "Chat onboarding event processed",
+                extra={"kind": event.kind, "user_id": event.user_id},
+            )
+            return Response(status_code=200)
+        except Exception:
+            logger.exception(
+                "Chat onboarding failed", extra={"kind": event.kind, "user_id": event.user_id}
+            )
             return Response(status_code=500)
 
     return app

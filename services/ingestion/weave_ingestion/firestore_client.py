@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, Literal
 
+from pydantic import BaseModel, ConfigDict, field_validator
 from weave_common import EnrichedOwnerBundle
 
 logger = logging.getLogger(__name__)
@@ -13,10 +14,44 @@ logger = logging.getLogger(__name__)
 LEASE = timedelta(minutes=15)
 MEETINGS = "processed_meetings"
 ACTION_ITEMS = "action_items"
+ONBOARDED = "onboarded_users"
+
+
+class OnboardedUser(BaseModel):
+    """Storage-backed delivery identity, internal to the ingestion boundary."""
+
+    model_config = ConfigDict(frozen=True, extra="ignore")
+
+    user_id: str
+    email: str
+    dm_space: str | None = None
+    status: Literal["active", "offboarding"] = "active"
+
+    @field_validator("user_id")
+    @classmethod
+    def numeric_user_id(cls, value: str) -> str:
+        if not value.isdigit():
+            raise ValueError("user_id must be a numeric Cloud Identity id")
+        return value
+
+    @field_validator("email")
+    @classmethod
+    def normalized_email(cls, value: str) -> str:
+        normalized = value.strip().casefold()
+        if "@" not in normalized:
+            raise ValueError("email must be a Workspace email address")
+        return normalized
+
+    @field_validator("dm_space")
+    @classmethod
+    def valid_dm_space(cls, value: str | None) -> str | None:
+        if value is not None and not value.startswith("spaces/"):
+            raise ValueError("dm_space must use the spaces/{id} resource format")
+        return value
 
 
 class MeetingLedger:
-    """Wraps the two collections the pipeline writes; client is injectable."""
+    """Wrap pipeline and onboarding collections; the client is injectable."""
 
     def __init__(self, client: Any | None = None) -> None:
         self._client = client
@@ -55,10 +90,97 @@ class MeetingLedger:
             logger.info("duplicate event ignored", extra={"conference_id": conference_id})
             return False
 
-    def mark(self, conference_id: str, status: str) -> None:
-        self.client.collection(MEETINGS).document(conference_id).set(
-            {"status": status, "updated_at": datetime.now(UTC)}, merge=True
+    def mark(
+        self,
+        conference_id: str,
+        status: str,
+        deliveries: dict[str, str] | None = None,
+    ) -> None:
+        update: dict[str, Any] = {"status": status, "updated_at": datetime.now(UTC)}
+        if deliveries is not None:
+            # Firestore field paths interpret dots as nesting. Workspace email
+            # addresses contain dots, so make them safe as delivery-map keys.
+            update["deliveries"] = {
+                email.strip().casefold().replace(".", ","): outcome
+                for email, outcome in deliveries.items()
+            }
+        self.client.collection(MEETINGS).document(conference_id).set(update, merge=True)
+
+    def onboarded_users(self) -> list[OnboardedUser]:
+        """Return all well-formed onboarding records in one collection scan."""
+        users: list[OnboardedUser] = []
+        for snapshot in self.client.collection(ONBOARDED).stream():
+            data = snapshot.to_dict() or {}
+            data.setdefault("user_id", snapshot.id)
+            try:
+                users.append(OnboardedUser.model_validate(data))
+            except ValueError:
+                logger.exception("invalid onboarding record", extra={"user_id": snapshot.id})
+        return users
+
+    def onboarded_by_email(self) -> dict[str, OnboardedUser]:
+        """Return active users keyed by normalized email for delivery lookup."""
+        return {
+            user.email.strip().casefold(): user
+            for user in self.onboarded_users()
+            if user.status == "active"
+        }
+
+    def upsert_onboarded_user(
+        self,
+        *,
+        user_id: str,
+        email: str,
+        dm_space: str | None,
+    ) -> OnboardedUser:
+        """Activate a user from a Chat install signal.
+
+        Installing the app is an opt-in signal only. Domain-wide delegation,
+        not this document, remains the authority for Workspace data access.
+        """
+        normalized_email = email.strip().casefold()
+        now = datetime.now(UTC)
+        reference = self.client.collection(ONBOARDED).document(user_id)
+        existing = reference.get().to_dict() or {}
+        reference.set(
+            {
+                "user_id": user_id,
+                "email": normalized_email,
+                "dm_space": dm_space,
+                "status": "active",
+                "onboarded_at": existing.get("onboarded_at", now),
+                "updated_at": now,
+            },
+            merge=True,
         )
+        return OnboardedUser(
+            user_id=user_id,
+            email=normalized_email,
+            dm_space=dm_space,
+            status="active",
+        )
+
+    def mark_offboarding(
+        self,
+        *,
+        user_id: str,
+        email: str | None = None,
+        dm_space: str | None = None,
+    ) -> None:
+        """Leave a tombstone so the delegated job can delete subscriptions."""
+        update: dict[str, Any] = {
+            "user_id": user_id,
+            "status": "offboarding",
+            "updated_at": datetime.now(UTC),
+        }
+        if email:
+            update["email"] = email.strip().casefold()
+        if dm_space:
+            update["dm_space"] = dm_space
+        self.client.collection(ONBOARDED).document(user_id).set(update, merge=True)
+
+    def delete_onboarded_user(self, user_id: str) -> None:
+        self.client.collection(ONBOARDED).document(user_id).delete()
 
     def write_action_items(
         self,

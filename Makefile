@@ -1,4 +1,4 @@
-.PHONY: install lint test eval web demo infra-init infra-plan infra-pass1 infra-pass2
+.PHONY: install lint test eval web demo onboard build-subscription-image infra-init infra-plan infra-pass1 infra-pass2
 
 TRANSCRIPT ?= samples/standup.txt
 EVAL_DELAY_SECONDS ?= 25
@@ -27,6 +27,13 @@ web:
 demo:
 	uv run python scripts/demo.py --transcript "$(TRANSCRIPT)"
 
+# Emergency/manual path. Normal onboarding happens when a user adds the Chat app.
+onboard:
+	@test -n "$(EMAIL)" || (echo "EMAIL is required" && exit 1)
+	@test -n "$(USER_ID)" || (echo "USER_ID is required" && exit 1)
+	uv run python scripts/onboard.py --email "$(EMAIL)" --user-id "$(USER_ID)" \
+	  $(if $(DM_SPACE),--dm-space "$(DM_SPACE)",) $(if $(PROJECT_ID),--project "$(PROJECT_ID)",)
+
 IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
 PROJECT_ID ?= $(shell cd infra && $(TF) output -raw project_id 2>/dev/null)
 REGION ?= us-central1
@@ -35,6 +42,13 @@ build-image:
 	gcloud builds submit --project=$(PROJECT_ID) \
 	  --config=services/ingestion/cloudbuild.yaml \
 	  --substitutions=_IMAGE=$(REGION)-docker.pkg.dev/$(PROJECT_ID)/weave/ingestion:$(IMAGE_TAG) \
+	  --gcs-source-staging-dir=gs://$(PROJECT_ID)-adk-staging/cloudbuild \
+	  --service-account=projects/$(PROJECT_ID)/serviceAccounts/weave-build-sa@$(PROJECT_ID).iam.gserviceaccount.com .
+
+build-subscription-image:
+	gcloud builds submit --project=$(PROJECT_ID) \
+	  --config=services/subscription_manager/cloudbuild.yaml \
+	  --substitutions=_IMAGE=$(REGION)-docker.pkg.dev/$(PROJECT_ID)/weave/subscription-manager:$(IMAGE_TAG) \
 	  --gcs-source-staging-dir=gs://$(PROJECT_ID)-adk-staging/cloudbuild \
 	  --service-account=projects/$(PROJECT_ID)/serviceAccounts/weave-build-sa@$(PROJECT_ID).iam.gserviceaccount.com .
 

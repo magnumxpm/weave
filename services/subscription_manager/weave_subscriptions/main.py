@@ -22,17 +22,19 @@ def _build_service(user_email: str):
 
 
 def main() -> int:
+    from weave_ingestion.firestore_client import MeetingLedger
     from weave_ingestion.logging_config import configure_logging
 
     configure_logging()
 
-    users = [u.strip() for u in os.environ["ONBOARDED_USERS"].split(",") if u.strip()]
+    ledger = MeetingLedger()
+    users = ledger.onboarded_users()
     topic = os.environ["MEET_TOPIC"]
     if not users:
         logger.warning("no onboarded users configured")
         return 0
 
-    outcomes = run(users, topic, _build_service)
+    outcomes = run(users, topic, _build_service, delete_onboarded=ledger.delete_onboarded_user)
     for outcome in outcomes:
         logger.info(
             "subscription outcome",

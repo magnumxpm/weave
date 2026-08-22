@@ -40,6 +40,11 @@ output "meet_artifacts_topic" {
   value = google_pubsub_topic.meet_artifacts.id
 }
 
+output "chat_events_topic" {
+  description = "Pub/Sub connection target configured on the internal Google Chat app."
+  value       = google_pubsub_topic.chat_events.id
+}
+
 output "artifact_registry_repo" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.weave.repository_id}"
 }

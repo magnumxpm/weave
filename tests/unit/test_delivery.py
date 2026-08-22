@@ -18,6 +18,8 @@ from weave_ingestion.delivery import (
     GeminiEnterpriseDeliverer,
     build_card,
 )
+from weave_ingestion.firestore_client import OnboardedUser
+from weave_ingestion.main import _build_welcome_sender
 
 
 def bundle(*, enriched: bool = True, deadline: date | None = date(2026, 8, 29)):
@@ -169,3 +171,46 @@ def test_chat_targets_numeric_id_not_email() -> None:
 
     assert directory.lookups == ["owner@example.com"]
     assert client.space_service.find_calls == ["users/112655489411114378906"]
+
+
+def test_chat_uses_stored_dm_space_without_identity_lookup() -> None:
+    client = ChatClient()
+    lookups: list[str] = []
+    deliverer = ChatDeliverer(client, lambda email: lookups.append(email) or "users/unexpected")
+    target = OnboardedUser(
+        user_id="112655489411114378906",
+        email="owner@example.com",
+        dm_space="spaces/stored-dm",
+    )
+
+    deliverer.deliver("owner@example.com", bundle(), target)
+
+    assert lookups == []
+    assert client.space_service.find_calls == []
+    assert client.space_service.message_service.calls[0]["parent"] == "spaces/stored-dm"
+
+
+def test_chat_refuses_a_target_for_another_owner() -> None:
+    client = ChatClient()
+    deliverer = ChatDeliverer(client, lambda email: "users/unexpected")
+    target = OnboardedUser(
+        user_id="123",
+        email="someone-else@example.com",
+        dm_space="spaces/wrong",
+    )
+    with pytest.raises(ValueError, match="target"):
+        deliverer.deliver("owner@example.com", bundle(), target)
+
+
+def test_welcome_uses_stable_idempotency_keys(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = ChatClient()
+    monkeypatch.setattr("weave_ingestion.main._build_chat_client", lambda: client)
+    sender = _build_welcome_sender()
+    target = OnboardedUser(user_id="123", email="owner@example.com", dm_space="spaces/stored-dm")
+    sender(target)
+    sender(target)
+
+    first, second = client.space_service.message_service.calls
+    assert first["messageId"] == "client-weave-welcome-v1"
+    assert first["requestId"] == second["requestId"]
+    assert first["parent"] == "spaces/stored-dm"

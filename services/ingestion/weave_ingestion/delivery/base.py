@@ -7,10 +7,17 @@ from typing import Any
 
 from weave_common import EnrichedOwnerBundle
 
+from weave_ingestion.firestore_client import OnboardedUser
+
 
 class Deliverer(ABC):
     @abstractmethod
-    def deliver(self, owner_email: str, bundle: EnrichedOwnerBundle) -> str:
+    def deliver(
+        self,
+        owner_email: str,
+        bundle: EnrichedOwnerBundle,
+        target: OnboardedUser | None = None,
+    ) -> str:
         """Deliver one owner bundle and return the provider delivery ID."""
 
 

@@ -46,6 +46,13 @@ resource "google_project_iam_member" "agent" {
   member   = google_service_account.agent.member
 }
 
+# The subscription job owns onboarding lifecycle reconciliation in Firestore.
+resource "google_project_iam_member" "subscriptions_datastore" {
+  project = var.project_id
+  role    = "roles/datastore.user"
+  member  = google_service_account.subscriptions.member
+}
+
 # Key-less domain-wide delegation: these SAs sign their own DWD assertions via
 # the IAM Credentials API instead of carrying exported keys.
 resource "google_service_account_iam_member" "ingestion_self_signer" {

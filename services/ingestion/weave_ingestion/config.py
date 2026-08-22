@@ -20,6 +20,7 @@ class Settings(BaseModel):
     artifact_source: Literal["live", "fixture"]
     fixture_dir: str = ""
     delivery_mode: Literal["chat", "log"]
+    subscription_job_name: str = ""
     # Admin impersonated for directory lookups only. The Meet fetch impersonates
     # the user whose subscription produced each event, never this account.
     admin_subject: str = ""
@@ -49,4 +50,5 @@ def settings_from_env() -> Settings:
         fixture_dir=os.environ.get("FIXTURE_DIR", ""),
         delivery_mode=os.environ.get("DELIVERY_MODE", "chat"),  # type: ignore[arg-type]
         admin_subject=os.environ.get("ADMIN_SUBJECT", ""),
+        subscription_job_name=os.environ.get("SUBSCRIPTION_JOB_NAME", ""),
     )

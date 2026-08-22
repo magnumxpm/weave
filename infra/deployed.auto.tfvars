@@ -7,9 +7,6 @@ image_tag        = "2fe6ecd"
 create_subscription_manager    = true
 subscription_manager_image_tag = "e24ba2e"
 
-# Numeric Cloud Identity ids, not emails (see SETUP.md §9).
-onboarded_users = ["112655489411114378906"] # me@pmukherjee.dev
-
 artifact_source = "live"
 delivery_mode   = "chat"
 admin_subject   = "me@pmukherjee.dev" # directory lookups only, not Meet reads
