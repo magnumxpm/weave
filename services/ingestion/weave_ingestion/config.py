@@ -20,18 +20,20 @@ class Settings(BaseModel):
     artifact_source: Literal["live", "fixture"]
     fixture_dir: str = ""
     delivery_mode: Literal["chat", "log"]
-    workspace_subject: str = ""  # user the delegated Meet fetch impersonates (live only)
+    # Admin impersonated for directory lookups only. The Meet fetch impersonates
+    # the user whose subscription produced each event, never this account.
+    admin_subject: str = ""
 
     @model_validator(mode="after")
     def source_specific_requirements(self) -> Settings:
         if self.artifact_source == "fixture" and not self.fixture_dir:
             raise ValueError("fixture_dir is required when artifact_source=fixture")
-        if self.artifact_source == "live" and not self.workspace_subject:
-            raise ValueError("workspace_subject is required when artifact_source=live")
-        # Chat delivery resolves owner ids through the directory, which is a
-        # delegated call and therefore needs a subject to impersonate.
-        if self.delivery_mode == "chat" and not self.workspace_subject:
-            raise ValueError("workspace_subject is required when delivery_mode=chat")
+        # Both live reads and Chat delivery resolve identities through the
+        # Directory API, which is a delegated call needing a subject.
+        if (self.artifact_source == "live" or self.delivery_mode == "chat") and (
+            not self.admin_subject
+        ):
+            raise ValueError("admin_subject is required for live reads or chat delivery")
         return self
 
 
@@ -46,5 +48,5 @@ def settings_from_env() -> Settings:
         artifact_source=os.environ.get("ARTIFACT_SOURCE", "live"),  # type: ignore[arg-type]
         fixture_dir=os.environ.get("FIXTURE_DIR", ""),
         delivery_mode=os.environ.get("DELIVERY_MODE", "chat"),  # type: ignore[arg-type]
-        workspace_subject=os.environ.get("WORKSPACE_SUBJECT", ""),
+        admin_subject=os.environ.get("ADMIN_SUBJECT", ""),
     )

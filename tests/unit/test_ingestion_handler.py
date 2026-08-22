@@ -20,7 +20,11 @@ from weave_common import (
 from weave_ingestion.config import Settings
 from weave_ingestion.delivery.base import Deliverer
 from weave_ingestion.main import create_app
-from weave_ingestion.meet_client import MeetArtifactSource, extract_conference_id
+from weave_ingestion.meet_client import (
+    MeetArtifactSource,
+    extract_conference_id,
+    extract_subscriber_user_id,
+)
 from weave_ingestion.oidc import PushAuthError
 
 
@@ -80,9 +84,11 @@ def pipeline_result() -> PipelineResult:
 class FakeSource(MeetArtifactSource):
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.subjects: list[str | None] = []
 
-    def fetch(self, conference_id: str) -> PipelineRequest:
+    def fetch(self, conference_id: str, subject: str | None = None) -> PipelineRequest:
         self.calls.append(conference_id)
+        self.subjects.append(subject)
         return pipeline_request()
 
 
@@ -222,3 +228,66 @@ def test_query_method_name_matches_deployment() -> None:
     from agent.deployment.deploy import QUERY_METHOD as deployed
 
     assert deployed == caller
+
+
+def test_subscriber_id_is_read_from_cloudevent_source() -> None:
+    attributes = {"ce-source": "//cloudidentity.googleapis.com/users/112655489411114378906"}
+    assert extract_subscriber_user_id(attributes, "") == "112655489411114378906"
+
+
+def test_subscriber_id_falls_back_to_the_payload() -> None:
+    payload = '{"subscription":"//cloudidentity.googleapis.com/users/999"}'
+    assert extract_subscriber_user_id({}, payload) == "999"
+
+
+def test_subscriber_id_absent_returns_none() -> None:
+    assert extract_subscriber_user_id({"ce-type": "x"}, "{}") is None
+
+
+def live_settings() -> Settings:
+    return settings().model_copy(
+        update={"artifact_source": "live", "admin_subject": "admin@example.com"}
+    )
+
+
+def test_live_mode_impersonates_the_subscribing_user() -> None:
+    source = FakeSource()
+    ledger = FakeLedger()
+    app = create_app(
+        live_settings(),
+        artifact_source=source,
+        ledger=ledger,  # type: ignore[arg-type]
+        deliverer=RecordingDeliverer(),
+        screen=FakeScreen(),  # type: ignore[arg-type]
+        run_pipeline=lambda request: pipeline_result(),
+        token_verifier=lambda token: {},
+        resolve_subject_email=lambda user_id: f"user-{user_id}@example.com",
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    body = push_body()
+    body["message"]["attributes"] = {
+        "ce-source": "//cloudidentity.googleapis.com/users/424242"
+    }
+    assert client.post("/pubsub-push", json=body, headers=AUTH).status_code == 200
+    # The fetch runs as the subscriber, not as a fixed configured account.
+    assert source.subjects == ["user-424242@example.com"]
+
+
+def test_live_mode_without_a_subscriber_id_fails_rather_than_guessing() -> None:
+    source = FakeSource()
+    ledger = FakeLedger()
+    app = create_app(
+        live_settings(),
+        artifact_source=source,
+        ledger=ledger,  # type: ignore[arg-type]
+        deliverer=RecordingDeliverer(),
+        screen=FakeScreen(),  # type: ignore[arg-type]
+        run_pipeline=lambda request: pipeline_result(),
+        token_verifier=lambda token: {},
+        resolve_subject_email=lambda user_id: "should-not-be-called@example.com",
+    )
+    client = TestClient(app, raise_server_exceptions=False)
+    response = client.post("/pubsub-push", json=push_body(), headers=AUTH)
+    assert response.status_code == 500
+    assert ledger.status["abc123"] == "failed"
+    assert source.calls == []

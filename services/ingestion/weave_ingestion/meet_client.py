@@ -14,6 +14,7 @@ from weave_common import Attendee, PipelineRequest, TranscriptTurn
 logger = logging.getLogger(__name__)
 
 _CONFERENCE_ID = re.compile(r"conferenceRecords/([A-Za-z0-9_-]+)")
+_SUBSCRIBER_ID = re.compile(r"cloudidentity\.googleapis\.com/users/(\d+)")
 
 
 def extract_conference_id(payload: str) -> str | None:
@@ -22,10 +23,26 @@ def extract_conference_id(payload: str) -> str | None:
     return match.group(1) if match else None
 
 
+def extract_subscriber_user_id(attributes: dict[str, str], payload: str) -> str | None:
+    """Numeric id of the user whose subscription produced this event.
+
+    Conference records are only visible to participants, so the Meet fetch must
+    impersonate this user rather than one fixed account. The id rides in the
+    CloudEvent `source` (the subscription's target resource); the payload is
+    searched as a fallback because the attribute name has varied.
+    """
+    for key in ("ce-source", "source", "ce-subject"):
+        if value := attributes.get(key):
+            if match := _SUBSCRIBER_ID.search(value):
+                return match.group(1)
+    match = _SUBSCRIBER_ID.search(payload)
+    return match.group(1) if match else None
+
+
 class MeetArtifactSource(ABC):
     @abstractmethod
-    def fetch(self, conference_id: str) -> PipelineRequest:
-        """Return the full pipeline request for a finished conference."""
+    def fetch(self, conference_id: str, subject: str | None = None) -> PipelineRequest:
+        """Return the pipeline request, reading as `subject` when impersonating."""
 
 
 class FixtureMeetArtifactSource(MeetArtifactSource):
@@ -38,7 +55,8 @@ class FixtureMeetArtifactSource(MeetArtifactSource):
     def __init__(self, fixture_dir: str) -> None:
         self._dir = Path(fixture_dir)
 
-    def fetch(self, conference_id: str) -> PipelineRequest:
+    def fetch(self, conference_id: str, subject: str | None = None) -> PipelineRequest:
+        del subject  # fixtures are not user-scoped
         path = self._dir / f"{conference_id}.json"
         return PipelineRequest.model_validate_json(path.read_text(encoding="utf-8"))
 
@@ -48,11 +66,16 @@ class LiveMeetArtifactSource(MeetArtifactSource):
 
     Identity is deterministic: transcript entries carry `participant`, and the
     participant's signed-in user id resolves to an email via the Directory API.
+
+    A Meet service is built per subject because conference records are visible
+    only to that conference's participants; one shared client would restrict the
+    system to a single user's meetings.
     """
 
-    def __init__(self, meet_service: Any, resolve_email: Any) -> None:
-        self._meet = meet_service
+    def __init__(self, build_meet_service: Any, resolve_email: Any) -> None:
+        self._build_meet_service = build_meet_service
         self._resolve_email = resolve_email
+        self._meet: Any = None
 
     def _paginate(self, request_fn: Any, key: str, **kwargs: Any) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -64,7 +87,10 @@ class LiveMeetArtifactSource(MeetArtifactSource):
             if not token:
                 return items
 
-    def fetch(self, conference_id: str) -> PipelineRequest:
+    def fetch(self, conference_id: str, subject: str | None = None) -> PipelineRequest:
+        if not subject:
+            raise ValueError("live Meet reads require a subject to impersonate")
+        self._meet = self._build_meet_service(subject)
         record_name = f"conferenceRecords/{conference_id}"
         record = self._meet.conferenceRecords().get(name=record_name).execute()
         meeting_date = date.fromisoformat(record["startTime"][:10])

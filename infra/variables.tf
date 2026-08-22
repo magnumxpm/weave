@@ -56,10 +56,10 @@ variable "artifact_source" {
   }
 }
 
-variable "workspace_subject" {
+variable "admin_subject" {
   type        = string
   default     = ""
-  description = "Workspace user the ingestion SA impersonates for Meet/Directory reads (required when artifact_source=live)."
+  description = "Workspace admin impersonated for Directory lookups only. Meet reads impersonate the user whose subscription produced each event. Required for artifact_source=live or delivery_mode=chat."
 }
 
 variable "delivery_mode" {

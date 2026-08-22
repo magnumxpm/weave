@@ -28,6 +28,7 @@ from weave_ingestion.meet_client import (
     FixtureMeetArtifactSource,
     MeetArtifactSource,
     extract_conference_id,
+    extract_subscriber_user_id,
 )
 from weave_ingestion.model_armor import TranscriptScreen
 from weave_ingestion.oidc import PushAuthError, verify_push_token
@@ -38,53 +39,47 @@ TokenVerifier = Callable[[str], dict[str, Any]]
 RunPipeline = Callable[[PipelineRequest], PipelineResult]
 
 
-def _build_live_source(settings: Settings) -> MeetArtifactSource:
+DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.user.readonly"
+MEET_SCOPE = "https://www.googleapis.com/auth/meetings.space.readonly"
+
+
+def _ingestion_sa(settings: Settings) -> str:
+    return f"weave-ingestion-sa@{settings.project_id}.iam.gserviceaccount.com"
+
+
+def _build_directory(settings: Settings):
     from googleapiclient.discovery import build
 
     from weave_ingestion.directory_client import DirectoryClient
+    from weave_ingestion.google_auth import delegated_credentials
+
+    credentials = delegated_credentials(
+        settings.admin_subject, [DIRECTORY_SCOPE], _ingestion_sa(settings)
+    )
+    return DirectoryClient(build("admin", "directory_v1", credentials=credentials))
+
+
+def _build_live_source(settings: Settings, directory) -> MeetArtifactSource:
+    from googleapiclient.discovery import build
+
     from weave_ingestion.google_auth import delegated_credentials
     from weave_ingestion.meet_client import LiveMeetArtifactSource
 
-    service_account = f"weave-ingestion-sa@{settings.project_id}.iam.gserviceaccount.com"
-    meet_credentials = delegated_credentials(
-        settings.workspace_subject,
-        ["https://www.googleapis.com/auth/meetings.space.readonly"],
-        service_account,
-    )
-    directory_credentials = delegated_credentials(
-        settings.workspace_subject,
-        ["https://www.googleapis.com/auth/admin.directory.user.readonly"],
-        service_account,
-    )
-    directory = DirectoryClient(build("admin", "directory_v1", credentials=directory_credentials))
-    return LiveMeetArtifactSource(
-        build("meet", "v2", credentials=meet_credentials), directory.email_for_user_id
-    )
+    def build_meet_service(subject: str):
+        credentials = delegated_credentials(subject, [MEET_SCOPE], _ingestion_sa(settings))
+        return build("meet", "v2", credentials=credentials)
+
+    return LiveMeetArtifactSource(build_meet_service, directory.email_for_user_id)
 
 
-def _build_chat_deliverer(settings: Settings) -> Deliverer:
+def _build_chat_deliverer(directory) -> Deliverer:
     from google.auth import default as default_credentials
     from googleapiclient.discovery import build
 
-    from weave_ingestion.directory_client import DirectoryClient
-    from weave_ingestion.google_auth import delegated_credentials
-
     credentials, _ = default_credentials(scopes=["https://www.googleapis.com/auth/chat.bot"])
     client = build("chat", "v1", credentials=credentials)
-
     # App-authenticated Chat calls cannot use an email alias, so resolve the
     # owner's numeric id through the directory.
-    directory = DirectoryClient(
-        build(
-            "admin",
-            "directory_v1",
-            credentials=delegated_credentials(
-                settings.workspace_subject,
-                ["https://www.googleapis.com/auth/admin.directory.user.readonly"],
-                f"weave-ingestion-sa@{settings.project_id}.iam.gserviceaccount.com",
-            ),
-        )
-    )
     return ChatDeliverer(client, lambda email: f"users/{directory.user_id_for_email(email)}")
 
 
@@ -97,19 +92,27 @@ def create_app(
     screen: TranscriptScreen | None = None,
     run_pipeline: RunPipeline | None = None,
     token_verifier: TokenVerifier | None = None,
+    resolve_subject_email: Callable[[str], str] | None = None,
 ) -> FastAPI:
     """Wire the handler; every collaborator is injectable for hermetic tests."""
+    directory = None
+    if artifact_source is None or deliverer is None:
+        needs_directory = settings.artifact_source == "live" or settings.delivery_mode == "chat"
+        directory = _build_directory(settings) if needs_directory else None
+
     if artifact_source is None:
         artifact_source = (
             FixtureMeetArtifactSource(settings.fixture_dir)
             if settings.artifact_source == "fixture"
-            else _build_live_source(settings)
+            else _build_live_source(settings, directory)
         )
+    if resolve_subject_email is None and directory is not None:
+        resolve_subject_email = directory.email_for_user_id
     if ledger is None:
         ledger = MeetingLedger()
     if deliverer is None:
         deliverer = (
-            LogDeliverer() if settings.delivery_mode == "log" else _build_chat_deliverer(settings)
+            LogDeliverer() if settings.delivery_mode == "log" else _build_chat_deliverer(directory)
         )
     if screen is None:
         screen = TranscriptScreen(settings.model_armor_input_template, settings.region)
@@ -146,8 +149,9 @@ def create_app(
 
         body = await request.json()
         message = body.get("message", {})
+        attributes = message.get("attributes", {}) or {}
         decoded = base64.b64decode(message.get("data", "")).decode("utf-8", errors="replace")
-        payload = decoded + json.dumps(message.get("attributes", {}))
+        payload = decoded + json.dumps(attributes)
         conference_id = extract_conference_id(payload)
         if conference_id is None:
             logger.warning("event without conference record id acked")
@@ -157,7 +161,29 @@ def create_app(
             return Response(status_code=200)
 
         try:
-            pipeline_request = artifact_source.fetch(conference_id)
+            # Impersonate the user whose subscription fired: conference records
+            # are visible only to that conference's participants.
+            subject = None
+            if settings.artifact_source == "live":
+                subscriber_id = extract_subscriber_user_id(attributes, decoded)
+                if subscriber_id is None:
+                    # Never guess an identity; surface the shape instead.
+                    logger.error(
+                        "no subscriber id in event",
+                        extra={
+                            "conference_id": conference_id,
+                            "attribute_keys": sorted(attributes),
+                            "attributes": json.dumps(attributes)[:1000],
+                        },
+                    )
+                    raise LookupError("cannot determine which user to read as")
+                subject = resolve_subject_email(subscriber_id)
+                logger.info(
+                    "reading meet artifacts as subscriber",
+                    extra={"conference_id": conference_id, "subject": subject},
+                )
+
+            pipeline_request = artifact_source.fetch(conference_id, subject)
             transcript_text = "\n".join(turn.text for turn in pipeline_request.transcript_turns)
             if screen.is_blocked(transcript_text):
                 ledger.mark(conference_id, "blocked")

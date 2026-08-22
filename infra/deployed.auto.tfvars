@@ -10,6 +10,6 @@ subscription_manager_image_tag = "e24ba2e"
 # Numeric Cloud Identity ids, not emails (see SETUP.md §9).
 onboarded_users = ["112655489411114378906"] # me@pmukherjee.dev
 
-# Flip to live + chat once a real meeting has been captured.
-artifact_source = "fixture"
-delivery_mode   = "log"
+artifact_source = "live"
+delivery_mode   = "chat"
+admin_subject   = "me@pmukherjee.dev" # directory lookups only, not Meet reads

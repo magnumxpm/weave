@@ -63,8 +63,8 @@ resource "google_cloud_run_v2_service" "ingestion" {
         value = "/app/services/ingestion/fixtures"
       }
       env {
-        name  = "WORKSPACE_SUBJECT"
-        value = var.workspace_subject
+        name  = "ADMIN_SUBJECT"
+        value = var.admin_subject
       }
       env {
         name  = "DELIVERY_MODE"
