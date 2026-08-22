@@ -210,6 +210,7 @@ participant accepted the prompt.
 | Agent Engine returns "no final response" | model name not on Vertex | see §7 |
 | `gcloud builds submit --tag` rejects `-f` | `--tag` mode cannot set a Dockerfile path | use the `cloudbuild.yaml` configs in each service |
 | Terraform/gcloud fail with `invalid_rapt` | Workspace reauth policy expired the session | `gcloud auth login` again |
+| `tofu plan` 403s reading the org policy, citing a missing quota project | the Org Policy API refuses ADC calls without one, and ADC loses it on re-auth | already handled by `user_project_override` in `versions.tf`; restore ADC's own with `gcloud auth application-default set-quota-project <PROJECT_ID>` |
 | `TARGET_RESOURCE_ACCESS_DENIED` creating a subscription | target must be the numeric Cloud Identity id | see §9 |
 | User can find Weave but is never onboarded | Chat interactive features or the Pub/Sub connection is not enabled | see §6a; inspect `chat-events-push` |
 | Group-space add does not onboard anyone | v1 intentionally accepts direct-message installs only | add Weave through New chat |
