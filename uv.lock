@@ -12,6 +12,7 @@ members = [
     "weave-agent",
     "weave-common",
     "weave-ingestion",
+    "weave-subscriptions",
 ]
 
 [[package]]
@@ -1985,6 +1986,23 @@ requires-dist = [
     { name = "google-cloud-modelarmor", specifier = ">=0.2.0" },
     { name = "uvicorn", specifier = ">=0.34.0" },
     { name = "weave-common", editable = "shared" },
+]
+
+[[package]]
+name = "weave-subscriptions"
+version = "0.1.0"
+source = { editable = "services/subscription_manager" }
+dependencies = [
+    { name = "google-api-python-client" },
+    { name = "google-auth" },
+    { name = "weave-ingestion" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "google-api-python-client", specifier = ">=2.166.0" },
+    { name = "google-auth", specifier = ">=2.38.0" },
+    { name = "weave-ingestion", editable = "services/ingestion" },
 ]
 
 [[package]]

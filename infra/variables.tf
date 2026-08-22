@@ -27,6 +27,24 @@ variable "agent_engine_id" {
   description = "Full reasoning engine resource name (required when create_cloud_run=true)."
 }
 
+variable "create_subscription_manager" {
+  type        = bool
+  default     = false
+  description = "Create the per-user subscription manager job (build plan D4)."
+}
+
+variable "subscription_manager_image_tag" {
+  type        = string
+  default     = ""
+  description = "Git-sha image tag for the subscription manager job."
+}
+
+variable "onboarded_users" {
+  type        = list(string)
+  default     = []
+  description = "Workspace users whose Meet transcripts Weave subscribes to."
+}
+
 variable "artifact_source" {
   type        = string
   default     = "fixture"

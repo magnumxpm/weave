@@ -22,11 +22,12 @@ dev = [
 ]
 
 [tool.uv.workspace]
-members = ["shared", "services/ingestion"]
+members = ["shared", "services/ingestion", "services/subscription_manager"]
 
 [tool.uv.sources]
 weave-common = { workspace = true }
 weave-ingestion = { workspace = true }
+weave-subscriptions = { workspace = true }
 
 [tool.uv.build-backend]
 module-name = "agent"
