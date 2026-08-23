@@ -5,10 +5,21 @@ resource "google_pubsub_topic" "chat_events" {
   depends_on = [google_project_service.required]
 }
 
+# Which identity publishes depends on how the app is configured. A Chat app
+# built as a Workspace add-on (what the Chat API console offers today) pushes
+# as the project's add-ons service agent, named on the Configuration page under
+# Connection settings; the classic Chat app pushes as chat-api-push. Granting
+# both keeps either configuration working, and neither can publish elsewhere.
 resource "google_pubsub_topic_iam_member" "chat_publisher" {
   topic  = google_pubsub_topic.chat_events.name
   role   = "roles/pubsub.publisher"
   member = "serviceAccount:chat-api-push@system.gserviceaccount.com"
+}
+
+resource "google_pubsub_topic_iam_member" "addons_publisher" {
+  topic  = google_pubsub_topic.chat_events.name
+  role   = "roles/pubsub.publisher"
+  member = "serviceAccount:service-${data.google_project.this.number}@gcp-sa-gsuiteaddons.iam.gserviceaccount.com"
 }
 
 resource "google_pubsub_subscription" "chat_events_push" {

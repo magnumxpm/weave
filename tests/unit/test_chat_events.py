@@ -31,8 +31,24 @@ def test_group_lifecycle_events_are_ignored() -> None:
     assert parse_chat_event(event("REMOVED_FROM_SPACE", dm=False)) is None
 
 
-def test_message_unknown_and_garbage_are_ignored() -> None:
-    assert parse_chat_event(event("MESSAGE")) is None
+def test_a_direct_message_onboards_because_dm_installs_never_send_added() -> None:
+    # ADDED_TO_SPACE only reaches apps that joined spaces and group
+    # conversations; a direct-message-only app sees MESSAGE instead.
+    assert parse_chat_event(event("MESSAGE")) == ChatEvent(
+        kind="added",
+        user_id="123",
+        email="user@example.com",
+        space_name="spaces/dm",
+    )
+
+
+def test_the_apps_own_messages_never_onboard() -> None:
+    payload = event("MESSAGE")
+    payload["user"]["type"] = "BOT"
+    assert parse_chat_event(payload) is None
+
+
+def test_unknown_and_garbage_are_ignored() -> None:
     assert parse_chat_event({"type": "FUTURE_EVENT"}) is None
     assert parse_chat_event("garbage") is None
 

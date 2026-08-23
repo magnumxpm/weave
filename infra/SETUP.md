@@ -89,11 +89,22 @@ Propagation takes minutes; `403 unauthorized_client` afterwards means wait.
   domain (or a test group during rollout).
 - Save; app status should read LIVE.
 
+Leave **Join spaces and group conversations** off: Weave delivers to direct
+messages only. That checkbox is what `ADDED_TO_SPACE` depends on, so with it
+off a direct-message install arrives as a `MESSAGE` event — which is the
+onboarding signal the handler acts on. Confirm the **Service account email**
+shown under Connection settings is one of the two publishers granted in
+`chat_events.tf`; an add-on-style app publishes as
+`service-<project-number>@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`, not as
+`chat-api-push`. Getting this wrong is silent: Chat publishes nothing and the
+topic simply stays empty.
+
 **6b. User onboarding.** Availability and installation are intentionally
-different. Each user chooses Chat → New chat → Weave and adds the app. The
-`ADDED_TO_SPACE` event stores that user's numeric id and exact DM space in
+different. Each user chooses Chat → New chat → Weave and **sends it any
+message**. That event stores the user's numeric id and exact DM space in
 Firestore, then submits an immediate subscription-manager sweep. A welcome card
-confirms that provisioning was queued.
+confirms that provisioning was queued. Removal is not always signalled for
+direct messages, so offboard with the ledger if a user must be removed.
 
 Do not force-install the app across the organisation for self-serve mode:
 managed users might not be able to remove it themselves. If this deployment was
@@ -213,6 +224,7 @@ participant accepted the prompt.
 | `tofu plan` 403s reading the org policy, citing a missing quota project | the Org Policy API refuses ADC calls without one, and ADC loses it on re-auth | already handled by `user_project_override` in `versions.tf`; restore ADC's own with `gcloud auth application-default set-quota-project <PROJECT_ID>` |
 | `TARGET_RESOURCE_ACCESS_DENIED` creating a subscription | target must be the numeric Cloud Identity id | see §9 |
 | User can find Weave but is never onboarded | Chat interactive features or the Pub/Sub connection is not enabled | see §6a; inspect `chat-events-push` |
+| App installs work but `chat-events` never receives a message | the publisher named on the Configuration page is not the one granted | grant the service account that page displays; both variants are in `chat_events.tf` |
 | Group-space add does not onboard anyone | v1 intentionally accepts direct-message installs only | add Weave through New chat |
 | Offboarding document remains present | subscription deletion failed, so the tombstone is retained for retry | inspect the subscription-manager execution logs |
 | Chat delivery uses Directory or 404s | legacy/manual onboarding record has no `dm_space` | reinstall Weave or repair it with `make onboard` |
