@@ -37,6 +37,17 @@ resource "google_firestore_index" "action_items_vector" {
     array_config = "CONTAINS"
   }
 
+  # Firestore stores `__name__` between the filter and the vector field and
+  # returns it on read. Omitting it here made every subsequent plan see drift,
+  # and because each field is ForceNew, an unrelated apply silently destroyed
+  # and recreated the index -- which is not a no-op: the destroy lands, the
+  # recreate 409s on the still-reserved index id, and vector search is down
+  # until it clears.
+  fields {
+    field_path = "__name__"
+    order      = "ASCENDING"
+  }
+
   fields {
     field_path = "embedding"
     vector_config {
