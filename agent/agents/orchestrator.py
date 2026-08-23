@@ -21,12 +21,13 @@ from agent.agents.extraction import run_extraction
 from agent.auth.principal_resolver import PrincipalResolutionError, resolve_principal
 from agent.auth.redaction import items_for_enrichment
 from agent.auth.reference_grounding import ground_references
-from agent.context_sources.base import SearchPrincipal
 
 logger = logging.getLogger(__name__)
 
 Extract = Callable[[PipelineRequest], MeetingInsights]
-Enrich = Callable[[SearchPrincipal, list[ActionItem]], OwnerItemList]
+# (principal, owner_items, *, conference_record_id) -> OwnerItemList. Spelled
+# loosely because the meeting id is keyword-only.
+Enrich = Callable[..., OwnerItemList]
 
 
 def _fingerprint(item: ActionItem) -> str:
@@ -111,7 +112,11 @@ def run_pipeline(
             continue
 
         try:
-            result = enrich(principal, owner_items.copy())
+            result = enrich(
+                principal,
+                owner_items.copy(),
+                conference_record_id=request.conference_record_id,
+            )
             scoped_items = enforce_owner_scope(owner_email, owner_items, result)
             if owner_items and not scoped_items:
                 bundles.append(

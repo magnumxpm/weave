@@ -109,8 +109,62 @@ def test_prior_meeting_source_filters_in_query_and_sorts_newest_first() -> None:
     )
     source = PriorMeetingSource(client=client)
 
-    results = source.search("anything", SearchPrincipal(email="owner@example.com"))
+    results = source.search("visible items", SearchPrincipal(email="owner@example.com"))
 
     assert client.collection_name == "action_items"
     assert [result.ref for result in results] == ["new", "old"]
     assert all("secret" not in result.snippet for result in results)
+    assert all(result.score and result.score > 0 for result in results)
+
+
+def test_prior_meeting_source_returns_nothing_when_nothing_relates() -> None:
+    client = FakeFirestoreClient(
+        [
+            FakeSnapshot(
+                "old",
+                {
+                    "description": "send the launch metrics report",
+                    "visible_to": ["owner@example.com"],
+                    "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+                },
+            )
+        ]
+    )
+    source = PriorMeetingSource(client=client)
+
+    principal = SearchPrincipal(email="owner@example.com")
+    assert source.search("renew the parking permit", principal) == []
+
+
+def test_the_current_meeting_is_not_its_own_prior_context() -> None:
+    class OwnMeetingSource(ContextSource):
+        name = "own_meeting"
+        auth_mode = AuthMode.USER_CONTEXT
+
+        def search(
+            self, query: str, principal: SearchPrincipal, limit: int = 5
+        ) -> list[ContextMatch]:
+            del query, principal, limit
+            return [
+                ContextMatch(
+                    source_name=self.name,
+                    match_type=MatchType.EXISTING_PRIOR_ITEM,
+                    title=title,
+                    snippet=title,
+                    ref=ref,
+                )
+                for ref, title in (
+                    ("abc123--owner@example.com--0", "this meeting, replayed"),
+                    ("older99--owner@example.com--0", "an actually prior meeting"),
+                )
+            ]
+
+    tool = make_search_related_context_tool([OwnMeetingSource()])
+    state = {
+        "search_principal": SearchPrincipal(email="owner@example.com"),
+        "conference_record_id": "conferenceRecords/abc123",
+    }
+
+    results = tool("query", SimpleNamespace(state=state))
+
+    assert [result["ref"] for result in results] == ["older99--owner@example.com--0"]

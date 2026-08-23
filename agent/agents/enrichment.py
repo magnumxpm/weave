@@ -48,7 +48,12 @@ def make_run_enrichment(
 ) -> Callable[[SearchPrincipal, list[ActionItem]], OwnerItemList]:
     agent = create_enrichment_agent(sources, after_model_callback)
 
-    def run_enrichment(principal: SearchPrincipal, owner_items: list[ActionItem]) -> OwnerItemList:
+    def run_enrichment(
+        principal: SearchPrincipal,
+        owner_items: list[ActionItem],
+        *,
+        conference_record_id: str = "",
+    ) -> OwnerItemList:
         runner = InMemoryRunner(agent=agent, app_name="weave_enrichment")
         session = runner.session_service.create_session_sync(
             app_name=runner.app_name,
@@ -57,6 +62,9 @@ def make_run_enrichment(
                 "search_principal": principal.model_dump(mode="json"),
                 "owner_email": principal.email,
                 "owner_items": [item.model_dump(mode="json") for item in owner_items],
+                # Read by the context tool to keep this meeting out of its own
+                # results, and by log_enrichment_scope.
+                "conference_record_id": conference_record_id,
             },
         )
         prompt = OwnerItemList(

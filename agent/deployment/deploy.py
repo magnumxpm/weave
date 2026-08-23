@@ -94,6 +94,10 @@ def main() -> None:
         service_account=args.service_account,
         env_vars={
             "GOOGLE_GENAI_USE_VERTEXAI": "1",
+            # Firestore needs the project id: this runtime's ADC resolves the
+            # project number, which it 404s on. Kept separate from
+            # GOOGLE_CLOUD_PROJECT, which would also move the genai endpoint.
+            "PROJECT_ID": args.project,
             "WEAVE_MODEL": os.environ.get("WEAVE_MODEL", "gemini-2.5-flash"),
             "MODEL_ARMOR_OUTPUT_TEMPLATE": (
                 f"projects/{args.project}/locations/{args.location}/templates/agent-output"

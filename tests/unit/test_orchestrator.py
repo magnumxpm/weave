@@ -65,7 +65,7 @@ def extractor(*items: ActionItem):
     return extract
 
 
-def passthrough(principal: SearchPrincipal, items: list[ActionItem]) -> OwnerItemList:
+def passthrough(principal: SearchPrincipal, items: list[ActionItem], **_: object) -> OwnerItemList:
     return OwnerItemList(
         owner_email=principal.email,
         items=[EnrichedActionItem(item=item, matches=[]) for item in items],
@@ -76,7 +76,7 @@ def test_transcript_only_attendee_is_refused_principal() -> None:
     result = run_pipeline(
         request("real@example.com"),
         extract=extractor(action("transcript-only@example.com")),
-        enrich=lambda principal, items: (_ for _ in ()).throw(AssertionError("searched")),
+        enrich=lambda *_, **__: (_ for _ in ()).throw(AssertionError("searched")),
     )
     assert result.bundles[0].enriched is False
     assert result.bundles[0].skip_reason == "not_attendee"
@@ -114,7 +114,7 @@ def test_pipeline_grounds_references_before_enrichment() -> None:
     )
     captured: list[ActionItem] = []
 
-    def capture(principal: SearchPrincipal, items: list[ActionItem]) -> OwnerItemList:
+    def capture(principal: SearchPrincipal, items: list[ActionItem], **_: object) -> OwnerItemList:
         captured.extend(items)
         return passthrough(principal, items)
 
@@ -132,7 +132,7 @@ def test_pipeline_grounds_references_before_enrichment() -> None:
 def test_enrichment_session_state_contains_only_owner_items() -> None:
     captured: dict[str, list[ActionItem]] = {}
 
-    def capture(principal: SearchPrincipal, items: list[ActionItem]) -> OwnerItemList:
+    def capture(principal: SearchPrincipal, items: list[ActionItem], **_: object) -> OwnerItemList:
         captured[principal.email] = items
         return passthrough(principal, items)
 
@@ -188,7 +188,9 @@ def test_enrichment_cannot_alter_the_delivered_item() -> None:
 def test_all_mismatched_echoes_fall_back_to_unenriched_items() -> None:
     original = action("a@example.com", description="Original")
 
-    def mismatched(principal: SearchPrincipal, items: list[ActionItem]) -> OwnerItemList:
+    def mismatched(
+        principal: SearchPrincipal, items: list[ActionItem], **_: object
+    ) -> OwnerItemList:
         del items
         return OwnerItemList(
             owner_email=principal.email,
@@ -207,7 +209,7 @@ def test_all_mismatched_echoes_fall_back_to_unenriched_items() -> None:
 
 
 def test_one_enrichment_failure_does_not_sink_other_owner() -> None:
-    def enrich(principal: SearchPrincipal, items: list[ActionItem]) -> OwnerItemList:
+    def enrich(principal: SearchPrincipal, items: list[ActionItem], **_: object) -> OwnerItemList:
         if principal.email == "a@example.com":
             raise RuntimeError("failed")
         return passthrough(principal, items)
