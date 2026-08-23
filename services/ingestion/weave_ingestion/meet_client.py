@@ -99,11 +99,26 @@ class LiveMeetArtifactSource(MeetArtifactSource):
         )
         attendees: list[Attendee] = []
         participant_names: dict[str, Attendee] = {}
+        signed_in_count = 0
         for participant in participants:
             signed_in = participant.get("signedinUser")
             if not signed_in:
                 continue  # anonymous/phone participants can never own an item
-            email = self._resolve_email(signed_in["user"].removeprefix("users/"))
+            signed_in_count += 1
+            try:
+                email = self._resolve_email(signed_in["user"].removeprefix("users/"))
+            except Exception:  # noqa: BLE001 - one guest must not fail the meeting
+                # Visitors from outside the directory cannot be resolved and so
+                # can never own an item. Drop the person, not the meeting; a
+                # systemic lookup failure is still caught below.
+                logger.warning(
+                    "unresolved participant dropped",
+                    extra={
+                        "conference_id": conference_id,
+                        "participant_id": participant.get("name"),
+                    },
+                )
+                continue
             attendee = Attendee(
                 email=email,
                 participant_id=participant["name"],
@@ -111,6 +126,14 @@ class LiveMeetArtifactSource(MeetArtifactSource):
             )
             attendees.append(attendee)
             participant_names[participant["name"]] = attendee
+
+        if signed_in_count and not attendees:
+            # Every signed-in participant failed to resolve: that is a broken
+            # directory, not a room full of guests. Fail loudly and retry.
+            raise LookupError(
+                f"none of the {signed_in_count} signed-in participants of {record_name} "
+                "could be resolved; directory lookups are failing"
+            )
 
         transcripts = self._paginate(
             self._meet.conferenceRecords().transcripts().list, "transcripts", parent=record_name
