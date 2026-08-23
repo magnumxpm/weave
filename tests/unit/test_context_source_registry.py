@@ -280,3 +280,25 @@ def test_context_tool_explicitly_requests_wide_recall() -> None:
         SimpleNamespace(state={"search_principal": SearchPrincipal(email="owner@example.com")}),
     )
     assert len(results) == 20
+
+
+def test_an_empty_query_embedding_falls_back_instead_of_reporting_no_context() -> None:
+    # An embedder returning nothing has failed quietly; treating that as a
+    # successful empty search would hide the outage behind "no related context".
+    client = FakeFirestoreClient(
+        [
+            FakeSnapshot(
+                "prior",
+                {
+                    "description": "renew the parking permit for the team",
+                    "visible_to": ["owner@example.com"],
+                    "created_at": datetime(2026, 1, 1, tzinfo=UTC),
+                },
+            )
+        ]
+    )
+    source = PriorMeetingSource(client=client, embed_query_fn=lambda query: [])
+
+    results = source.search("parking permit renewal", SearchPrincipal(email="owner@example.com"))
+
+    assert [result.ref for result in results] == ["prior"]

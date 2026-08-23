@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import UTC, datetime
 from typing import Any
 
 from scripts.backfill_embeddings import backfill
@@ -62,3 +63,23 @@ def test_backfill_is_idempotent_and_uses_written_text() -> None:
 
     assert backfill(client, embed) == 0
     assert texts == ["Written title\nWritten details"]
+
+
+def test_backfill_dates_legacy_items_from_their_write_time() -> None:
+    # Documents written before meeting_date existed would otherwise reach the
+    # agent undated, leaving staleness unjudgeable.
+    legacy = Snapshot(
+        {"description": "Older item", "created_at": datetime(2026, 8, 23, 1, 46, tzinfo=UTC)}
+    )
+    dated = Snapshot(
+        {
+            "description": "Newer item",
+            "meeting_date": "2026-08-20",
+            "created_at": datetime(2026, 8, 23, 1, 46, tzinfo=UTC),
+        }
+    )
+
+    backfill(Client([legacy, dated]), lambda values: [[0.5] * 768 for _ in values])
+
+    assert legacy.data["meeting_date"] == "2026-08-23"
+    assert dated.data["meeting_date"] == "2026-08-20"

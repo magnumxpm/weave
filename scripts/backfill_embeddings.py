@@ -41,15 +41,24 @@ def backfill(
     updated = 0
     for snapshots in _batches(missing, BATCH_SIZE):
         texts = []
+        records = []
         for snapshot in snapshots:
             item = snapshot.to_dict() or {}
+            records.append(item)
             title = item.get("title") or item.get("description") or "Prior action item"
             texts.append(f"{title}\n{item.get('details') or ''}")
         vectors = embed_documents_fn(texts)
         if len(vectors) != len(snapshots) or any(len(vector) != DIMENSIONS for vector in vectors):
             raise ValueError("embedding response shape does not match backfill batch")
-        for snapshot, vector in zip(snapshots, vectors, strict=True):
-            snapshot.reference.update({"embedding": Vector(vector)})
+        for snapshot, item, vector in zip(snapshots, records, vectors, strict=True):
+            update: dict[str, Any] = {"embedding": Vector(vector)}
+            # Items written before meeting_date existed would otherwise reach the
+            # agent with no date at all, leaving it unable to judge staleness.
+            # The write timestamp is same-day in practice and is the only date
+            # these documents carry.
+            if not item.get("meeting_date") and (created_at := item.get("created_at")):
+                update["meeting_date"] = created_at.date().isoformat()
+            snapshot.reference.update(update)
             updated += 1
     return updated
 

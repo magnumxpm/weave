@@ -73,7 +73,10 @@ class PriorMeetingSource(ContextSource):
     def _semantic(self, query: str, principal: SearchPrincipal, limit: int) -> list[ContextMatch]:
         query_vector = self._embed_query(query)
         if not query_vector:
-            return []
+            # An embedder that returns nothing has failed, quietly. Returning []
+            # here would be logged as a successful vector search that found
+            # nothing, which is indistinguishable from a working empty corpus.
+            raise ValueError("query embedding is empty")
         snapshots = list(
             self.client.collection("action_items")
             .where(filter=FieldFilter("visible_to", "array_contains", principal.email))

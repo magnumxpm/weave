@@ -6,7 +6,9 @@ The tool deliberately returns up to 20 high-recall candidates. Most may be noise
 candidate that bears on this action now. Reject completed or superseded work, a different request
 that merely shares people or generic words, and old context whose current state is unknowable.
 Use occurred_on relative to the supplied current meeting date, and treat similarity score as one
-signal rather than proof. An empty matches list is the expected answer when nothing still matters.
+signal rather than proof. When occurred_on is missing, age is unknown: judge that candidate on
+substance alone and do not assume it is either current or stale. An empty matches list is the
+expected answer when nothing still matters.
 
 For each item, also write:
 - title: one imperative line, no trailing detail, at most 160 characters;
