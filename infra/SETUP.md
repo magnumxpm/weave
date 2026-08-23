@@ -217,4 +217,6 @@ participant accepted the prompt.
 | Offboarding document remains present | subscription deletion failed, so the tombstone is retained for retry | inspect the subscription-manager execution logs |
 | Chat delivery uses Directory or 404s | legacy/manual onboarding record has no `dm_space` | reinstall Weave or repair it with `make onboard` |
 | Meet fetch 403s for another user's meeting | reads must impersonate the subscribing user, not a fixed one | see §8 |
+| Directory lookups 403 for everyone except the impersonated user | `domain_public` needs domain contact sharing and otherwise resolves only the caller | the client uses `admin_view`; keep `admin_subject` an admin |
+| A meeting fails because one attendee cannot be resolved | external guests are not in the directory | they are dropped individually; only an all-participant failure raises |
 | A loop variable before `:method` in a URL 404s in zsh | zsh reads `$var:g...` as a history modifier | brace it: `${var}:generateContent` |

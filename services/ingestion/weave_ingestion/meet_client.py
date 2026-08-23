@@ -27,11 +27,12 @@ def extract_subscriber_user_id(attributes: dict[str, str], payload: str) -> str 
     """Numeric id of the user whose subscription produced this event.
 
     Conference records are only visible to participants, so the Meet fetch must
-    impersonate this user rather than one fixed account. The id rides in the
-    CloudEvent `source` (the subscription's target resource); the payload is
-    searched as a fallback because the attribute name has varied.
+    impersonate this user rather than one fixed account. Live events carry it in
+    `ce-subject` as `//cloudidentity.googleapis.com/users/{id}` (`ce-source`
+    names the subscription, not the user); the other keys and the payload are
+    searched as fallbacks in case the envelope changes.
     """
-    for key in ("ce-source", "source", "ce-subject"):
+    for key in ("ce-subject", "subject", "ce-source", "source"):
         if (value := attributes.get(key)) and (match := _SUBSCRIBER_ID.search(value)):
             return match.group(1)
     match = _SUBSCRIBER_ID.search(payload)
