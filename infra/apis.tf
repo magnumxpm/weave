@@ -6,6 +6,9 @@ locals {
     "chat.googleapis.com",
     "cloudbuild.googleapis.com",
     "cloudscheduler.googleapis.com",
+    # The meeting agenda is the transcript document's Drive title; the DWD scope
+    # was already granted, but the API itself was never enabled here.
+    "drive.googleapis.com",
     "firestore.googleapis.com",
     "logging.googleapis.com",
     "meet.googleapis.com",
