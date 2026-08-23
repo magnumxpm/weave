@@ -2,7 +2,7 @@
 # what a rollout is; committing them keeps `tofu plan` honest between rollouts.
 create_cloud_run = true
 agent_engine_id  = "projects/884578202776/locations/us-central1/reasoningEngines/6558922760486125568"
-image_tag        = "4675d41"
+image_tag        = "0ced1b3"
 
 create_subscription_manager    = true
 subscription_manager_image_tag = "e425c98"
