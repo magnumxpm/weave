@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from weave_common import EnrichedOwnerBundle
+from weave_common import EnrichedOwnerBundle, ReferenceStatus
 
 from weave_ingestion.firestore_client import OnboardedUser
 
@@ -33,25 +33,32 @@ def build_card(bundle: EnrichedOwnerBundle) -> dict[str, Any]:
         widgets: list[dict[str, Any]] = [
             _decorated_text("Action", item.description),
             _decorated_text("Status", item.status.value),
-            _decorated_text(
-                "Commitment turn",
-                str(item.commitment_turn_ref)
-                if item.commitment_turn_ref is not None
-                else "Unknown",
-            ),
         ]
         if item.deadline is not None:
             widgets.append(_decorated_text("Deadline", item.deadline.isoformat()))
 
-        if not bundle.enriched:
-            context_text = "Related context unavailable"
-        elif not enriched_item.matches:
-            context_text = "No related context found"
-        else:
+        unknown_references = [
+            reference
+            for reference in item.references
+            if reference.status is ReferenceStatus.UNKNOWN
+        ]
+        if unknown_references:
+            widgets.append(
+                _decorated_text(
+                    "Unidentified",
+                    "\n".join(
+                        f'"{reference.mention}" (turn {reference.turn_ref}) '
+                        "could not be identified from the transcript"
+                        for reference in unknown_references
+                    ),
+                )
+            )
+
+        if bundle.enriched and enriched_item.matches:
             context_text = "\n".join(
                 f"{match.source_name}: {match.title}" for match in enriched_item.matches
             )
-        widgets.append(_decorated_text("Related context", context_text))
+            widgets.append(_decorated_text("Related context", context_text))
         sections.append({"widgets": widgets})
 
     return {

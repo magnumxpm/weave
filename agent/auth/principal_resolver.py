@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Literal
 
+from weave_common import IDENTITY_CONFIDENCE_FLOOR
+
 from agent.context_sources.base import SearchPrincipal
 
 PrincipalFailureReason = Literal["no_email", "low_confidence", "not_attendee"]
@@ -21,7 +23,7 @@ def resolve_principal(
     """Resolve only sufficiently confident owners present in trusted Meet data."""
     if not owner_email or not owner_email.strip():
         raise PrincipalResolutionError("no_email")
-    if confidence < 0.85:
+    if confidence < IDENTITY_CONFIDENCE_FLOOR:
         raise PrincipalResolutionError("low_confidence")
 
     normalized_email = owner_email.strip().casefold()

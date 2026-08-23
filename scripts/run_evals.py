@@ -27,6 +27,9 @@ SUITES = (
             "accepted_reassignment",
             "accept_without_deadline",
             "ambiguous_owner",
+            "first_person_reference_resolved",
+            "unidentifiable_third_person",
+            "second_person_is_the_owner",
         ),
     ),
     EvalSuite(

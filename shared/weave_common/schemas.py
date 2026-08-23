@@ -22,6 +22,8 @@ ACTIONABLE_STATUSES: frozenset[CommitmentStatus] = frozenset(
     {CommitmentStatus.ACCEPTED, CommitmentStatus.REASSIGNED}
 )
 
+IDENTITY_CONFIDENCE_FLOOR = 0.85
+
 
 class ActionType(StrEnum):
     TASK = "task"
@@ -33,6 +35,11 @@ class MatchType(StrEnum):
     EXISTING_PRIOR_ITEM = "existing_prior_item"
     RELATED_DISCUSSION = "related_discussion"
     NONE = "none"
+
+
+class ReferenceStatus(StrEnum):
+    RESOLVED = "resolved"
+    UNKNOWN = "unknown"
 
 
 class FrozenModel(BaseModel):
@@ -52,8 +59,30 @@ class TranscriptTurn(FrozenModel):
     text: str
 
 
+class Reference(FrozenModel):
+    """One person-reference in an action item, resolved or explicitly unknown."""
+
+    mention: str
+    turn_ref: int = Field(ge=0)
+    status: ReferenceStatus
+    email: str | None = None
+    display_name: str | None = None
+    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
+
+    @model_validator(mode="after")
+    def identity_matches_status(self) -> Reference:
+        if self.status is ReferenceStatus.RESOLVED:
+            if not self.email or not self.display_name:
+                raise ValueError("resolved references require email and display_name")
+        elif self.email or self.display_name:
+            raise ValueError("unknown references must not carry an identity")
+        return self
+
+
 class ActionItem(FrozenModel):
     description: str
+    source_text: str | None = None
+    references: list[Reference] = Field(default_factory=list)
     action_type: ActionType
     status: CommitmentStatus
     owner_email: str | None

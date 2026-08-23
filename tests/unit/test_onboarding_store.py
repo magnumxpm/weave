@@ -1,11 +1,21 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
-from weave_ingestion.firestore_client import MEETINGS, ONBOARDED, MeetingLedger
+from weave_common import (
+    ActionItem,
+    ActionType,
+    CommitmentStatus,
+    EnrichedActionItem,
+    EnrichedOwnerBundle,
+    Reference,
+    ReferenceStatus,
+)
+from weave_ingestion.firestore_client import ACTION_ITEMS, MEETINGS, ONBOARDED, MeetingLedger
 
 
 class Snapshot:
@@ -112,3 +122,48 @@ def test_mark_records_delivery_outcomes_with_firestore_safe_keys() -> None:
     )
     stored = client.collections[MEETINGS]["meeting"]
     assert stored["deliveries"] == {"owner,name@example,com": "delivery_failed"}
+
+
+def test_action_item_persistence_includes_reference_provenance() -> None:
+    client = Client()
+    item = ActionItem(
+        description="Follow up with Srija Ghosh",
+        source_text="follow up with me",
+        references=[
+            Reference(
+                mention="me",
+                turn_ref=4,
+                status=ReferenceStatus.RESOLVED,
+                email="srija@example.com",
+                display_name="Srija Ghosh",
+                confidence=1.0,
+            )
+        ],
+        action_type=ActionType.FOLLOW_UP,
+        status=CommitmentStatus.ACCEPTED,
+        owner_email="owner@example.com",
+        owner_confidence=1.0,
+        resolution_turn_ref=5,
+    )
+    bundle = EnrichedOwnerBundle(
+        owner_email="owner@example.com",
+        conference_record_id="conferenceRecords/one",
+        meeting_date=date(2026, 8, 23),
+        items=[EnrichedActionItem(item=item)],
+        enriched=True,
+    )
+
+    MeetingLedger(client).write_action_items("one", [bundle], ["srija@example.com"])
+
+    stored = next(iter(client.collections[ACTION_ITEMS].values()))
+    assert stored["source_text"] == "follow up with me"
+    assert stored["references"] == [
+        {
+            "mention": "me",
+            "turn_ref": 4,
+            "status": "resolved",
+            "email": "srija@example.com",
+            "display_name": "Srija Ghosh",
+            "confidence": 1.0,
+        }
+    ]

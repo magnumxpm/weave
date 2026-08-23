@@ -196,6 +196,10 @@ class MeetingLedger:
                     {
                         "conference_record_id": conference_id,
                         "description": item.description,
+                        "source_text": item.source_text,
+                        "references": [
+                            reference.model_dump(mode="json") for reference in item.references
+                        ],
                         "owner_email": bundle.owner_email,
                         "status": item.status.value,
                         "deadline": item.deadline.isoformat() if item.deadline else None,

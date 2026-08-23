@@ -20,6 +20,7 @@ def test_participant_id_match() -> None:
         "email": "sarah@example.com",
         "confidence": 1.0,
         "method": "participant_id",
+        "display_name": "Sarah Chen",
     }
 
 
@@ -27,6 +28,7 @@ def test_exact_display_name_match() -> None:
     result = resolve_speaker("sarah chen", context(SARAH))
     assert result["email"] == SARAH.email
     assert result["confidence"] == 0.95
+    assert result["display_name"] == "Sarah Chen"
 
 
 def test_first_name_fuzzy_match() -> None:
@@ -53,7 +55,12 @@ def test_ambiguous_first_name_is_rejected() -> None:
             Attendee(email="b@example.com", participant_id="2", display_name="Alex Jones"),
         ),
     )
-    assert result == {"email": None, "confidence": 0.0, "method": "ambiguous"}
+    assert result == {
+        "email": None,
+        "confidence": 0.0,
+        "method": "ambiguous",
+        "display_name": None,
+    }
 
 
 def test_missing_attendees_never_raises() -> None:
@@ -61,4 +68,5 @@ def test_missing_attendees_never_raises() -> None:
         "email": None,
         "confidence": 0.0,
         "method": "no_attendees",
+        "display_name": None,
     }

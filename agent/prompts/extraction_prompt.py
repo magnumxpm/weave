@@ -14,6 +14,29 @@ turn that resolves it. Status meanings are strict:
 - reassigned: responsibility moves to a new owner who explicitly accepts it.
 - unresolved: an assignment receives no explicit response; silence is never acceptance.
 
+Write description as one concise, self-contained imperative sentence. Rewrite ASR stutters and
+fragments instead of copying a transcript slice. Preserve the verbatim action span in source_text.
+Descriptions must use third-person names and pronouns; never use "you" or "your".
+
+Resolve every person-reference in the action, including first person (me, I, my), second person
+(you, your), third person (him, her, them), and bare first names. Emit one Reference per spoken
+mention, preserving mention exactly and recording its turn_ref.
+- First person refers to the speaker of that turn. Call resolve_speaker with that turn's
+  participant_id, or its speaker_name when the ID is absent.
+- Second person refers to the already-resolved owner of the assignment.
+- Third person and bare names must be passed to resolve_speaker using the spoken name.
+- Copy email, display_name, and confidence exactly from resolve_speaker. When the tool cannot
+  identify the referent, emit status="unknown", omit email and display_name, set confidence to
+  0.0, and leave the original word in description. Never guess an identity.
+- For a resolved reference, use status="resolved" and rewrite description to name that person or
+  use an unambiguous third-person pronoun (for example, "my device" becomes "her device").
+
+Example: turn 4, Srija says "can you follow up with me about the support request I raised
+yesterday for my device". If the owner accepts, description is "Follow up with Srija Ghosh about
+the support request she raised yesterday for her device, which is not working." source_text keeps
+the spoken action span, and references contains resolved entries for "me", "I", and "my" at turn
+4, all copied from resolve_speaker for Srija's participant ID.
+
 Do not add context, background research, or action items unsupported by transcript turns.
 Return the validated MeetingInsights structure for the supplied conference record and date.
 """.strip()

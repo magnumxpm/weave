@@ -2,6 +2,7 @@
 
 from weave_common.schemas import (
     ACTIONABLE_STATUSES,
+    IDENTITY_CONFIDENCE_FLOOR,
     ActionItem,
     ActionType,
     Attendee,
@@ -14,11 +15,14 @@ from weave_common.schemas import (
     OwnerItemList,
     PipelineRequest,
     PipelineResult,
+    Reference,
+    ReferenceStatus,
     TranscriptTurn,
 )
 
 __all__ = [
     "ACTIONABLE_STATUSES",
+    "IDENTITY_CONFIDENCE_FLOOR",
     "ActionItem",
     "ActionType",
     "Attendee",
@@ -31,5 +35,7 @@ __all__ = [
     "OwnerItemList",
     "PipelineRequest",
     "PipelineResult",
+    "Reference",
+    "ReferenceStatus",
     "TranscriptTurn",
 ]

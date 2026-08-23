@@ -7,10 +7,14 @@ from weave_common import (
     ActionType,
     Attendee,
     CommitmentStatus,
+    ContextMatch,
     EnrichedActionItem,
+    MatchType,
     MeetingInsights,
     OwnerItemList,
     PipelineRequest,
+    Reference,
+    ReferenceStatus,
     TranscriptTurn,
 )
 
@@ -93,6 +97,38 @@ def test_confidence_boundary() -> None:
     assert exact.bundles[0].enriched is True
 
 
+def test_pipeline_grounds_references_before_enrichment() -> None:
+    extracted = action("owner@example.com").model_copy(
+        update={
+            "references": [
+                Reference(
+                    mention="her",
+                    turn_ref=1,
+                    status=ReferenceStatus.RESOLVED,
+                    email="invented@example.com",
+                    display_name="Invented Person",
+                    confidence=1.0,
+                )
+            ]
+        }
+    )
+    captured: list[ActionItem] = []
+
+    def capture(principal: SearchPrincipal, items: list[ActionItem]) -> OwnerItemList:
+        captured.extend(items)
+        return passthrough(principal, items)
+
+    run_pipeline(
+        request("owner@example.com"),
+        extract=extractor(extracted),
+        enrich=capture,
+    )
+
+    assert captured[0].references == [
+        Reference(mention="her", turn_ref=1, status=ReferenceStatus.UNKNOWN)
+    ]
+
+
 def test_enrichment_session_state_contains_only_owner_items() -> None:
     captured: dict[str, list[ActionItem]] = {}
 
@@ -127,6 +163,47 @@ def test_enforce_owner_scope_drops_foreign_modified_and_duplicate_items() -> Non
     )
     scoped = enforce_owner_scope("a@example.com", [original], result)
     assert [item.item for item in scoped] == [original]
+
+
+def test_enrichment_cannot_alter_the_delivered_item() -> None:
+    original = action("a@example.com").model_copy(update={"source_text": "spoken words"})
+    match = ContextMatch(
+        source_name="prior_meetings",
+        match_type=MatchType.RELATED_DISCUSSION,
+        title="Prior discussion",
+        snippet="Context",
+    )
+    echoed = original.model_copy()
+    result = OwnerItemList(
+        owner_email="a@example.com",
+        items=[EnrichedActionItem(item=echoed, matches=[match])],
+    )
+
+    scoped = enforce_owner_scope("a@example.com", [original], result)
+
+    assert scoped[0].item is original
+    assert scoped[0].matches == [match]
+
+
+def test_all_mismatched_echoes_fall_back_to_unenriched_items() -> None:
+    original = action("a@example.com", description="Original")
+
+    def mismatched(principal: SearchPrincipal, items: list[ActionItem]) -> OwnerItemList:
+        del items
+        return OwnerItemList(
+            owner_email=principal.email,
+            items=[EnrichedActionItem(item=original.model_copy(update={"description": "Changed"}))],
+        )
+
+    result = run_pipeline(
+        request("a@example.com"),
+        extract=extractor(original),
+        enrich=mismatched,
+    )
+
+    assert result.bundles[0].enriched is False
+    assert result.bundles[0].skip_reason == "enrichment_echo_mismatch"
+    assert [enriched.item for enriched in result.bundles[0].items] == [original]
 
 
 def test_one_enrichment_failure_does_not_sink_other_owner() -> None:

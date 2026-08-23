@@ -20,8 +20,18 @@ def _attendees_from_state(tool_context: ToolContext) -> list[Attendee]:
     return attendees
 
 
-def _result(email: str | None, confidence: float, method: str) -> dict[str, Any]:
-    return {"email": email, "confidence": confidence, "method": method}
+def _result(
+    email: str | None,
+    confidence: float,
+    method: str,
+    display_name: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "email": email,
+        "confidence": confidence,
+        "method": method,
+        "display_name": display_name,
+    }
 
 
 def resolve_speaker(speaker: str, tool_context: ToolContext) -> dict[str, Any]:
@@ -35,13 +45,15 @@ def resolve_speaker(speaker: str, tool_context: ToolContext) -> dict[str, Any]:
         attendee for attendee in attendees if attendee.participant_id.casefold() == candidate
     ]
     if len(participant_matches) == 1:
-        return _result(participant_matches[0].email, 1.0, "participant_id")
+        attendee = participant_matches[0]
+        return _result(attendee.email, 1.0, "participant_id", attendee.display_name)
 
     name_matches = [
         attendee for attendee in attendees if attendee.display_name.strip().casefold() == candidate
     ]
     if len(name_matches) == 1:
-        return _result(name_matches[0].email, 0.95, "display_name")
+        attendee = name_matches[0]
+        return _result(attendee.email, 0.95, "display_name", attendee.display_name)
     if len(name_matches) > 1:
         return _result(None, 0.0, "ambiguous")
 
@@ -60,4 +72,9 @@ def resolve_speaker(speaker: str, tool_context: ToolContext) -> dict[str, Any]:
         return _result(None, 0.0, "ambiguous")
 
     score, attendee = ranked[0]
-    return _result(attendee.email, round(score * 0.9, 4), "fuzzy_name")
+    return _result(
+        attendee.email,
+        round(score * 0.9, 4),
+        "fuzzy_name",
+        attendee.display_name,
+    )

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-from collections import Counter
 from collections.abc import Callable
 
 from weave_common import (
@@ -21,6 +20,7 @@ from agent.agents.enrichment import run_enrichment
 from agent.agents.extraction import run_extraction
 from agent.auth.principal_resolver import PrincipalResolutionError, resolve_principal
 from agent.auth.redaction import items_for_enrichment
+from agent.auth.reference_grounding import ground_references
 from agent.context_sources.base import SearchPrincipal
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,9 @@ def enforce_owner_scope(
         logger.warning("dropping enrichment with mismatched owner")
         return []
 
-    remaining = Counter(_fingerprint(item) for item in original_items)
+    remaining: dict[str, list[ActionItem]] = {}
+    for item in original_items:
+        remaining.setdefault(_fingerprint(item), []).append(item)
     accepted: list[EnrichedActionItem] = []
     for enriched_item in result.items:
         fingerprint = _fingerprint(enriched_item.item)
@@ -52,12 +54,12 @@ def enforce_owner_scope(
         if (
             embedded_owner is None
             or embedded_owner.strip().casefold() != owner_email.strip().casefold()
-            or remaining[fingerprint] <= 0
+            or not remaining.get(fingerprint)
         ):
             logger.warning("dropping out-of-scope enriched item")
             continue
-        remaining[fingerprint] -= 1
-        accepted.append(enriched_item)
+        original = remaining[fingerprint].pop()
+        accepted.append(EnrichedActionItem(item=original, matches=enriched_item.matches))
     return accepted
 
 
@@ -84,9 +86,10 @@ def run_pipeline(
     enrich: Enrich = run_enrichment,
 ) -> PipelineResult:
     insights = extract(request)
+    grounded_items = [ground_references(item, request.attendees) for item in insights.items]
     grouped: dict[str, list[ActionItem]] = {}
     dropped = 0
-    for item in insights.items:
+    for item in grounded_items:
         if not item.is_actionable() or not item.owner_email:
             dropped += 1
             continue
@@ -110,6 +113,16 @@ def run_pipeline(
         try:
             result = enrich(principal, owner_items.copy())
             scoped_items = enforce_owner_scope(owner_email, owner_items, result)
+            if owner_items and not scoped_items:
+                bundles.append(
+                    _unenriched_bundle(
+                        request,
+                        owner_email,
+                        owner_items,
+                        "enrichment_echo_mismatch",
+                    )
+                )
+                continue
             bundles.append(
                 EnrichedOwnerBundle(
                     owner_email=owner_email,

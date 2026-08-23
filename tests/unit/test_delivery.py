@@ -12,6 +12,8 @@ from weave_common import (
     EnrichedActionItem,
     EnrichedOwnerBundle,
     MatchType,
+    Reference,
+    ReferenceStatus,
 )
 from weave_ingestion.delivery import (
     ChatDeliverer,
@@ -72,18 +74,63 @@ def test_build_card_renders_card_v2_contract() -> None:
     assert card["cardId"] == "weave-abc"
     assert card["card"]["header"]["title"] == "Your action items from 2026-08-22"
     assert len(card["card"]["sections"]) == 1
-    assert "3" in widget_texts(card)
+    labels = [
+        widget["decoratedText"]["topLabel"]
+        for section in card["card"]["sections"]
+        for widget in section["widgets"]
+    ]
+    assert "Commitment turn" not in labels
     assert "prior_meetings: Earlier launch report" in widget_texts(card)
 
 
-def test_unenriched_and_no_match_states_are_distinct() -> None:
-    unavailable = widget_texts(build_card(bundle(enriched=False)))
+def test_related_context_is_omitted_when_there_is_nothing_to_show() -> None:
+    unavailable = build_card(bundle(enriched=False))
     no_matches_bundle = bundle().model_copy(
         update={"items": [bundle().items[0].model_copy(update={"matches": []})]}
     )
-    no_matches = widget_texts(build_card(no_matches_bundle))
-    assert "Related context unavailable" in unavailable
-    assert "No related context found" in no_matches
+    for card in (unavailable, build_card(no_matches_bundle)):
+        labels = [
+            widget["decoratedText"]["topLabel"]
+            for section in card["card"]["sections"]
+            for widget in section["widgets"]
+        ]
+        assert "Related context" not in labels
+
+
+def test_unidentified_mentions_are_shown_only_when_present() -> None:
+    resolved_card = build_card(bundle())
+    unknown = Reference(mention="them", turn_ref=7, status=ReferenceStatus.UNKNOWN)
+    original_item = bundle().items[0].item
+    unknown_bundle = bundle().model_copy(
+        update={
+            "items": [
+                bundle()
+                .items[0]
+                .model_copy(
+                    update={"item": original_item.model_copy(update={"references": [unknown]})}
+                )
+            ]
+        }
+    )
+
+    assert "Unidentified" not in [
+        widget["decoratedText"]["topLabel"]
+        for section in resolved_card["card"]["sections"]
+        for widget in section["widgets"]
+    ]
+    unidentified = [
+        widget["decoratedText"]
+        for section in build_card(unknown_bundle)["card"]["sections"]
+        for widget in section["widgets"]
+        if widget["decoratedText"]["topLabel"] == "Unidentified"
+    ]
+    assert unidentified == [
+        {
+            "topLabel": "Unidentified",
+            "text": '"them" (turn 7) could not be identified from the transcript',
+            "wrapText": True,
+        }
+    ]
 
 
 def test_deadline_is_omitted_when_absent() -> None:

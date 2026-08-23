@@ -232,3 +232,5 @@ participant accepted the prompt.
 | Directory lookups 403 for everyone except the impersonated user | `domain_public` needs domain contact sharing and otherwise resolves only the caller | the client uses `admin_view`; keep `admin_subject` an admin |
 | A meeting fails because one attendee cannot be resolved | external guests are not in the directory | they are dropped individually; only an all-participant failure raises |
 | A loop variable before `:method` in a URL 404s in zsh | zsh reads `$var:g...` as a history modifier | brace it: `${var}:generateContent` |
+| Cards deliver with a header and no items | enrichment echoed the item inexactly, so the fingerprint gate dropped everything | the orchestrator falls back to an unenriched bundle; check `dropping out-of-scope enriched item` warnings |
+| Every meeting fails at `PipelineResult.model_validate` after an agent deploy | a schema-widening agent was deployed ahead of ingestion | deploy ingestion first, then redeploy the agent |
