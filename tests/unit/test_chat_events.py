@@ -53,6 +53,48 @@ def test_unknown_and_garbage_are_ignored() -> None:
     assert parse_chat_event("garbage") is None
 
 
+def addon_event(payload_field: str, *, space_beside_payload: bool = True) -> dict:
+    # The console configures Chat apps as Workspace add-ons, which nest the
+    # interaction under `chat` and identify it by which payload field exists.
+    space = {"name": "spaces/dm", "spaceType": "DIRECT_MESSAGE", "type": "DM"}
+    chat: dict = {
+        "user": {"name": "users/123", "email": "user@example.com", "type": "HUMAN"},
+        payload_field: {"message": {"text": "hi"}},
+    }
+    if space_beside_payload:
+        chat["space"] = space
+    else:
+        chat[payload_field]["space"] = space
+    return {"chat": chat, "commonEventObject": {}}
+
+
+def test_addon_direct_message_onboards() -> None:
+    assert parse_chat_event(addon_event("messagePayload")) == ChatEvent(
+        kind="added",
+        user_id="123",
+        email="user@example.com",
+        space_name="spaces/dm",
+    )
+
+
+def test_addon_space_may_live_inside_the_payload() -> None:
+    parsed = parse_chat_event(addon_event("messagePayload", space_beside_payload=False))
+    assert parsed is not None
+    assert parsed.space_name == "spaces/dm"
+
+
+def test_addon_added_and_removed_payloads_map_to_kinds() -> None:
+    assert parse_chat_event(addon_event("addedToSpacePayload")).kind == "added"  # type: ignore[union-attr]
+    assert parse_chat_event(addon_event("removedFromSpacePayload")).kind == "removed"  # type: ignore[union-attr]
+
+
+def test_addon_envelope_without_a_known_payload_is_ignored() -> None:
+    assert (
+        parse_chat_event({"chat": {"user": {"name": "users/1"}}, "commonEventObject": {}}) is None
+    )
+    assert parse_chat_event(addon_event("buttonClickedPayload")) is None
+
+
 def test_user_name_must_contain_numeric_identity() -> None:
     payload = event()
     payload["user"]["name"] = "users/not-numeric"
