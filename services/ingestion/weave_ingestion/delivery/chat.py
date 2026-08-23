@@ -7,7 +7,7 @@ from typing import Any
 
 from weave_common import EnrichedOwnerBundle
 
-from weave_ingestion.delivery.base import Deliverer, build_card
+from weave_ingestion.delivery.base import Deliverer, MeetingHeader, build_card
 from weave_ingestion.firestore_client import OnboardedUser
 
 
@@ -25,6 +25,7 @@ class ChatDeliverer(Deliverer):
         owner_email: str,
         bundle: EnrichedOwnerBundle,
         target: OnboardedUser | None = None,
+        meeting: MeetingHeader | None = None,
     ) -> str:
         normalized_owner = owner_email.strip().casefold()
         if normalized_owner != bundle.owner_email.strip().casefold():
@@ -43,7 +44,7 @@ class ChatDeliverer(Deliverer):
         response = (
             self._client.spaces()
             .messages()
-            .create(parent=space_name, body={"cardsV2": [build_card(bundle)]})
+            .create(parent=space_name, body={"cardsV2": [build_card(bundle, meeting)]})
             .execute()
         )
         return str(response["name"])

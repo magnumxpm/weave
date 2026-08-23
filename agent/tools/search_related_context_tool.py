@@ -16,6 +16,7 @@ from agent.context_sources.base import ContextSource, SearchPrincipal
 from agent.context_sources.registry import build_sources, search_all
 
 logger = logging.getLogger(__name__)
+RECALL = 20
 
 
 @lru_cache(maxsize=1)
@@ -55,7 +56,7 @@ def _search(
     if principal is None:
         logger.warning("context search skipped: no valid principal")
         return []
-    matches = search_all(list(sources), query, principal)
+    matches = search_all(list(sources), query, principal, limit=RECALL)
     # A meeting is never its own prior context. Nothing from the current
     # meeting is stored yet on a first run, but a reprocessed one would
     # otherwise offer an item its own earlier copy.

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from datetime import date
 from typing import Any
 
@@ -18,7 +19,7 @@ from weave_common import (
     TranscriptTurn,
 )
 from weave_ingestion.config import Settings
-from weave_ingestion.delivery.base import Deliverer
+from weave_ingestion.delivery.base import Deliverer, MeetingHeader
 from weave_ingestion.firestore_client import OnboardedUser
 from weave_ingestion.main import create_app
 from weave_ingestion.meet_client import (
@@ -169,6 +170,7 @@ class RecordingDeliverer(Deliverer):
     def __init__(self, failures: set[str] | None = None) -> None:
         self.delivered: list[str] = []
         self.targets: list[OnboardedUser | None] = []
+        self.meetings: list[MeetingHeader | None] = []
         self.failures = failures or set()
 
     def deliver(
@@ -176,11 +178,13 @@ class RecordingDeliverer(Deliverer):
         owner_email: str,
         bundle: EnrichedOwnerBundle,
         target: OnboardedUser | None = None,
+        meeting: MeetingHeader | None = None,
     ) -> str:
         if owner_email in self.failures:
             raise RuntimeError("Chat unavailable")
         self.delivered.append(owner_email)
         self.targets.append(target)
+        self.meetings.append(meeting)
         return f"fake:{owner_email}"
 
 
@@ -251,6 +255,7 @@ def test_happy_path_delivers_writes_and_acks() -> None:
     assert response.status_code == 200
     assert source.calls == ["abc123"]
     assert deliverer.delivered == ["ana@example.com"]
+    assert deliverer.meetings == [MeetingHeader(participant_names=("Bob",))]
     assert ledger.status["abc123"] == "delivered"
     assert ledger.deliveries["abc123"] == {"ana@example.com": "delivered"}
     assert ledger.items[0]["visible_to"] == ["ana@example.com", "bob@example.com"]
@@ -527,3 +532,33 @@ def test_welcome_failure_does_not_roll_back_onboarding() -> None:
     )
     assert response.status_code == 200
     assert ledger.onboarding_writes
+
+
+def test_chat_card_click_is_acked_without_onboarding(
+    caplog: Any,
+) -> None:
+    caplog.set_level(logging.INFO, logger="weave_ingestion.main")
+    payload = chat_event("CARD_CLICKED")
+    payload["action"] = {
+        "actionMethodName": "accept_item",
+        "parameters": [
+            {"key": "conference_id", "value": "abc123"},
+            {"key": "item_index", "value": "1"},
+        ],
+    }
+    client, _, ledger, _, _ = build()
+
+    response = client.post("/chat-events", json=chat_push_body(payload), headers=AUTH)
+
+    assert response.status_code == 200
+    assert ledger.onboarding_writes == []
+    assert ledger.offboarding_writes == []
+    record = next(
+        record
+        for record in caplog.records
+        if record.message == "Chat action-card click acknowledged"
+    )
+    assert record.function == "accept_item"
+    assert record.conference_id == "abc123"
+    assert record.item_index == "1"
+    assert record.user_id == "303"

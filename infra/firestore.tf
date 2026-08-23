@@ -26,3 +26,22 @@ resource "google_firestore_index" "action_items_visibility" {
     order      = "DESCENDING"
   }
 }
+
+# Semantic prior-item search keeps the owner ACL in the vector query itself.
+resource "google_firestore_index" "action_items_vector" {
+  database   = google_firestore_database.default.name
+  collection = "action_items"
+
+  fields {
+    field_path   = "visible_to"
+    array_config = "CONTAINS"
+  }
+
+  fields {
+    field_path = "embedding"
+    vector_config {
+      dimension = 768
+      flat {}
+    }
+  }
+}

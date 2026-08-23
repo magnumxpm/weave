@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from abc import ABC, abstractmethod
-from datetime import date
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -72,10 +72,17 @@ class LiveMeetArtifactSource(MeetArtifactSource):
     system to a single user's meetings.
     """
 
-    def __init__(self, build_meet_service: Any, resolve_email: Any) -> None:
+    def __init__(
+        self,
+        build_meet_service: Any,
+        resolve_email: Any,
+        build_drive_service: Any | None = None,
+    ) -> None:
         self._build_meet_service = build_meet_service
+        self._build_drive_service = build_drive_service
         self._resolve_email = resolve_email
         self._meet: Any = None
+        self._drive: Any = None
 
     def _paginate(self, request_fn: Any, key: str, **kwargs: Any) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
@@ -87,13 +94,35 @@ class LiveMeetArtifactSource(MeetArtifactSource):
             if not token:
                 return items
 
+    def _meeting_title(self, document_id: str | None) -> str | None:
+        """Read the agenda-like title from the transcript Drive document."""
+        if not document_id or self._drive is None:
+            return None
+        try:
+            response = (
+                self._drive.files()
+                .get(
+                    fileId=document_id.rsplit("/", 1)[-1],
+                    fields="name",
+                    supportsAllDrives=True,
+                )
+                .execute()
+            )
+            name = str(response.get("name") or "").removesuffix(" - Transcript")
+            return name.split(" (", 1)[0].strip() or None
+        except Exception:  # noqa: BLE001 - the agenda must never fail a meeting
+            logger.exception("transcript document title unavailable")
+            return None
+
     def fetch(self, conference_id: str, subject: str | None = None) -> PipelineRequest:
         if not subject:
             raise ValueError("live Meet reads require a subject to impersonate")
         self._meet = self._build_meet_service(subject)
+        self._drive = self._build_drive_service(subject) if self._build_drive_service else None
         record_name = f"conferenceRecords/{conference_id}"
         record = self._meet.conferenceRecords().get(name=record_name).execute()
-        meeting_date = date.fromisoformat(record["startTime"][:10])
+        started_at = datetime.fromisoformat(record["startTime"].replace("Z", "+00:00"))
+        meeting_date = started_at.date()
 
         participants = self._paginate(
             self._meet.conferenceRecords().participants().list, "participants", parent=record_name
@@ -141,6 +170,8 @@ class LiveMeetArtifactSource(MeetArtifactSource):
         )
         if not transcripts:
             raise LookupError(f"no transcript for {record_name}")
+        document_id = (transcripts[0].get("docsDestination") or {}).get("document")
+        meeting_title = self._meeting_title(document_id)
         entries = self._paginate(
             self._meet.conferenceRecords().transcripts().entries().list,
             "transcriptEntries",
@@ -168,4 +199,6 @@ class LiveMeetArtifactSource(MeetArtifactSource):
             conference_record_id=record_name,
             meeting_date=meeting_date,
             attendees=attendees,
+            meeting_title=meeting_title,
+            started_at=started_at,
         )

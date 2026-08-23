@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 import pytest
@@ -107,7 +107,10 @@ def test_prior_meeting_source_filters_in_query_and_sorts_newest_first() -> None:
             ),
         ]
     )
-    source = PriorMeetingSource(client=client)
+    source = PriorMeetingSource(
+        client=client,
+        embed_query_fn=lambda query: (_ for _ in ()).throw(RuntimeError(query)),
+    )
 
     results = source.search("visible items", SearchPrincipal(email="owner@example.com"))
 
@@ -130,7 +133,10 @@ def test_prior_meeting_source_returns_nothing_when_nothing_relates() -> None:
             )
         ]
     )
-    source = PriorMeetingSource(client=client)
+    source = PriorMeetingSource(
+        client=client,
+        embed_query_fn=lambda query: (_ for _ in ()).throw(RuntimeError(query)),
+    )
 
     principal = SearchPrincipal(email="owner@example.com")
     assert source.search("renew the parking permit", principal) == []
@@ -168,3 +174,109 @@ def test_the_current_meeting_is_not_its_own_prior_context() -> None:
     results = tool("query", SimpleNamespace(state=state))
 
     assert [result["ref"] for result in results] == ["older99--owner@example.com--0"]
+
+
+def test_vector_search_keeps_the_acl_prefilter_and_maps_results() -> None:
+    calls: list[tuple[str, object]] = []
+
+    class VectorQuery:
+        def __init__(self) -> None:
+            self.filtered = False
+
+        def where(self, *, filter: object) -> VectorQuery:
+            assert filter.field_path == "visible_to"
+            assert filter.op_string == "array_contains"
+            assert filter.value == "owner@example.com"
+            self.filtered = True
+            calls.append(("where", filter))
+            return self
+
+        def find_nearest(self, **kwargs: object) -> VectorQuery:
+            assert self.filtered, "find_nearest must never run without the ACL prefilter"
+            assert kwargs["limit"] == 7
+            calls.append(("find_nearest", kwargs))
+            return self
+
+        def stream(self) -> list[FakeSnapshot]:
+            return [
+                FakeSnapshot(
+                    "prior",
+                    {
+                        "description": "Expense claim still needs finance approval",
+                        "title": "Submit the expense claim",
+                        "meeting_date": "2026-08-01",
+                        "vector_distance": 0.12,
+                    },
+                )
+            ]
+
+    class Client:
+        def collection(self, name: str) -> VectorQuery:
+            assert name == "action_items"
+            return VectorQuery()
+
+    source = PriorMeetingSource(client=Client(), embed_query_fn=lambda query: [0.1] * 768)
+    results = source.search(
+        "reimbursement paperwork", SearchPrincipal(email="owner@example.com"), limit=7
+    )
+
+    assert [call[0] for call in calls] == ["where", "find_nearest"]
+    assert results[0].score == pytest.approx(0.88)
+    assert results[0].occurred_on == date(2026, 8, 1)
+    assert results[0].title == "Submit the expense claim"
+
+
+def test_vector_failure_falls_back_to_lexical_results() -> None:
+    client = FakeFirestoreClient(
+        [
+            FakeSnapshot(
+                "prior",
+                {
+                    "description": "prepare launch readiness report",
+                    "visible_to": ["owner@example.com"],
+                    "created_at": datetime(2026, 8, 1, tzinfo=UTC),
+                },
+            )
+        ]
+    )
+    source = PriorMeetingSource(client=client, embed_query_fn=lambda query: [0.1] * 768)
+
+    results = source.search("launch report", SearchPrincipal(email="owner@example.com"))
+
+    assert [result.ref for result in results] == ["prior"]
+
+
+def test_empty_query_never_calls_the_embedder() -> None:
+    calls: list[str] = []
+    source = PriorMeetingSource(
+        client=FakeFirestoreClient([]), embed_query_fn=lambda query: calls.append(query) or []
+    )
+    assert source.search("   ", SearchPrincipal(email="owner@example.com")) == []
+    assert calls == []
+
+
+def test_context_tool_explicitly_requests_wide_recall() -> None:
+    class RecallSource(ContextSource):
+        name = "recall"
+        auth_mode = AuthMode.USER_CONTEXT
+
+        def search(
+            self, query: str, principal: SearchPrincipal, limit: int = 5
+        ) -> list[ContextMatch]:
+            del query, principal
+            return [
+                ContextMatch(
+                    source_name=self.name,
+                    match_type=MatchType.EXISTING_PRIOR_ITEM,
+                    title=f"candidate {index}",
+                    snippet="candidate",
+                )
+                for index in range(limit)
+            ]
+
+    tool = make_search_related_context_tool([RecallSource()])
+    results = tool(
+        "query",
+        SimpleNamespace(state={"search_principal": SearchPrincipal(email="owner@example.com")}),
+    )
+    assert len(results) == 20

@@ -1,4 +1,4 @@
-from weave_ingestion.chat_events import ChatEvent, parse_chat_event
+from weave_ingestion.chat_events import ChatClickEvent, ChatEvent, parse_chat_event
 
 
 def event(event_type: str = "ADDED_TO_SPACE", *, dm: bool = True) -> dict:
@@ -107,3 +107,34 @@ def test_email_can_be_absent_for_directory_fallback() -> None:
     parsed = parse_chat_event(payload)
     assert parsed is not None
     assert parsed.email is None
+
+
+def test_classic_card_click_parses_without_becoming_onboarding() -> None:
+    payload = event("CARD_CLICKED")
+    payload["action"] = {
+        "actionMethodName": "accept_item",
+        "parameters": [
+            {"key": "conference_id", "value": "abc"},
+            {"key": "item_index", "value": "2"},
+        ],
+    }
+    assert parse_chat_event(payload) == ChatClickEvent(
+        function="accept_item",
+        conference_id="abc",
+        item_index="2",
+        user_id="123",
+    )
+
+
+def test_addon_card_click_reads_common_event_parameters() -> None:
+    payload = addon_event("buttonClickedPayload")
+    payload["commonEventObject"] = {
+        "invokedFunction": "decline_item",
+        "parameters": {"conference_id": "abc", "item_index": "1"},
+    }
+    assert parse_chat_event(payload) == ChatClickEvent(
+        function="decline_item",
+        conference_id="abc",
+        item_index="1",
+        user_id="123",
+    )

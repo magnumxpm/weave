@@ -8,6 +8,7 @@ dependencies = [
     "google-adk[eval]==2.5.0",
     "google-cloud-firestore>=2.21.0",
     "google-cloud-modelarmor>=0.2.0",
+    "google-genai>=2.19.0",
     "pyyaml>=6.0.2",
     "weave-common",
 ]

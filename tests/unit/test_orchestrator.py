@@ -176,13 +176,22 @@ def test_enrichment_cannot_alter_the_delivered_item() -> None:
     echoed = original.model_copy()
     result = OwnerItemList(
         owner_email="a@example.com",
-        items=[EnrichedActionItem(item=echoed, matches=[match])],
+        items=[
+            EnrichedActionItem(
+                item=echoed,
+                matches=[match],
+                title="Send the report",
+                details="Use the prior discussion to finish the report.",
+            )
+        ],
     )
 
     scoped = enforce_owner_scope("a@example.com", [original], result)
 
     assert scoped[0].item is original
     assert scoped[0].matches == [match]
+    assert scoped[0].title == "Send the report"
+    assert scoped[0].details == "Use the prior discussion to finish the report."
 
 
 def test_all_mismatched_echoes_fall_back_to_unenriched_items() -> None:
@@ -222,6 +231,30 @@ def test_one_enrichment_failure_does_not_sink_other_owner() -> None:
     bundles = {bundle.owner_email: bundle for bundle in result.bundles}
     assert bundles["a@example.com"].skip_reason == "enrichment_error"
     assert bundles["b@example.com"].enriched is True
+
+
+def test_overlong_enrichment_degrades_only_that_owner() -> None:
+    def too_long(principal: SearchPrincipal, items: list[ActionItem], **_: object) -> OwnerItemList:
+        return OwnerItemList.model_validate(
+            {
+                "owner_email": principal.email,
+                "items": [
+                    {
+                        "item": items[0].model_dump(mode="json"),
+                        "details": "x" * 701,
+                    }
+                ],
+            }
+        )
+
+    result = run_pipeline(
+        request("a@example.com"),
+        extract=extractor(action("a@example.com")),
+        enrich=too_long,
+    )
+
+    assert result.bundles[0].enriched is False
+    assert result.bundles[0].skip_reason == "enrichment_error"
 
 
 def test_non_actionable_and_unroutable_items_are_counted_as_dropped() -> None:

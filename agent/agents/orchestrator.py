@@ -60,7 +60,14 @@ def enforce_owner_scope(
             logger.warning("dropping out-of-scope enriched item")
             continue
         original = remaining[fingerprint].pop()
-        accepted.append(EnrichedActionItem(item=original, matches=enriched_item.matches))
+        accepted.append(
+            EnrichedActionItem(
+                item=original,
+                matches=enriched_item.matches,
+                title=enriched_item.title,
+                details=enriched_item.details,
+            )
+        )
     return accepted
 
 
@@ -116,6 +123,7 @@ def run_pipeline(
                 principal,
                 owner_items.copy(),
                 conference_record_id=request.conference_record_id,
+                meeting_date=request.meeting_date,
             )
             scoped_items = enforce_owner_scope(owner_email, owner_items, result)
             if owner_items and not scoped_items:

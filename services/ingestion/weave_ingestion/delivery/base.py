@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
-from weave_common import EnrichedOwnerBundle, ReferenceStatus
+from weave_common import CommitmentStatus, EnrichedOwnerBundle, ReferenceStatus
 
 from weave_ingestion.firestore_client import OnboardedUser
+
+
+@dataclass(frozen=True)
+class MeetingHeader:
+    """Ingestion-owned meeting metadata that never enters agent context."""
+
+    title: str | None = None
+    started_at: datetime | None = None
+    participant_names: tuple[str, ...] = ()
 
 
 class Deliverer(ABC):
@@ -17,57 +28,146 @@ class Deliverer(ABC):
         owner_email: str,
         bundle: EnrichedOwnerBundle,
         target: OnboardedUser | None = None,
+        meeting: MeetingHeader | None = None,
     ) -> str:
         """Deliver one owner bundle and return the provider delivery ID."""
 
 
-def _decorated_text(label: str, value: str) -> dict[str, Any]:
-    return {"decoratedText": {"topLabel": label, "text": value, "wrapText": True}}
+def _decorated_text(
+    text: str,
+    *,
+    top_label: str | None = None,
+    start_icon: str | None = None,
+) -> dict[str, Any]:
+    value: dict[str, Any] = {"text": text, "wrapText": True}
+    if top_label:
+        value["topLabel"] = top_label
+    if start_icon:
+        value["startIcon"] = {"materialIcon": {"name": start_icon}}
+    return {"decoratedText": value}
 
 
-def build_card(bundle: EnrichedOwnerBundle) -> dict[str, Any]:
-    """Render one owner-scoped bundle into a Card v2 payload."""
+def _participant_line(names: tuple[str, ...]) -> str | None:
+    unique = tuple(dict.fromkeys(name.strip() for name in names if name.strip()))
+    if not unique:
+        return None
+    if len(unique) == 1:
+        return f"with {unique[0]}"
+    if len(unique) == 2:
+        return f"with {unique[0]} and {unique[1]}"
+    return f"with {unique[0]}, {unique[1]}, and {len(unique) - 2} more"
+
+
+def _status(status: CommitmentStatus) -> tuple[str, str]:
+    if status is CommitmentStatus.ACCEPTED:
+        return "Accepted by you", "check_circle"
+    if status is CommitmentStatus.REASSIGNED:
+        return "Reassigned to you", "check_circle"
+    return "Awaiting your response", "schedule"
+
+
+def _action_button(
+    *, icon: str, alt_text: str, function: str, conference_id: str, item_index: int
+) -> dict[str, Any]:
+    return {
+        "icon": {"materialIcon": {"name": icon}},
+        "altText": alt_text,
+        "onClick": {
+            "action": {
+                "function": function,
+                "parameters": [
+                    {"key": "conference_id", "value": conference_id},
+                    {"key": "item_index", "value": str(item_index)},
+                ],
+            }
+        },
+    }
+
+
+def build_card(
+    bundle: EnrichedOwnerBundle,
+    meeting: MeetingHeader | None = None,
+) -> dict[str, Any]:
+    """Render one owner-scoped bundle without exposing retrieved context."""
+    header: dict[str, Any] = {"title": "Action items for you"}
+    if meeting is not None:
+        subtitle_parts = []
+        if meeting.title:
+            subtitle_parts.append(meeting.title)
+        if meeting.started_at:
+            subtitle_parts.append(meeting.started_at.strftime("%H:%M"))
+        if subtitle_parts:
+            header["subtitle"] = " • ".join(subtitle_parts)
+
     sections: list[dict[str, Any]] = []
-    for enriched_item in bundle.items:
+    if meeting is not None and (participants := _participant_line(meeting.participant_names)):
+        sections.append({"widgets": [_decorated_text(participants, start_icon="group")]})
+
+    conference_id = bundle.conference_record_id.rsplit("/", 1)[-1]
+    for item_index, enriched_item in enumerate(bundle.items, start=1):
         item = enriched_item.item
+        has_title = bool(enriched_item.title and enriched_item.title.strip())
+        title = enriched_item.title if has_title else item.description
+        status_text, status_icon = _status(item.status)
         widgets: list[dict[str, Any]] = [
-            _decorated_text("Action", item.description),
-            _decorated_text("Status", item.status.value),
+            _decorated_text(
+                f"{item_index}. {title}",
+                top_label=status_text,
+                start_icon=status_icon,
+            )
         ]
-        if item.deadline is not None:
-            widgets.append(_decorated_text("Deadline", item.deadline.isoformat()))
+        if enriched_item.details:
+            widgets.append(_decorated_text(enriched_item.details, top_label="Details"))
 
         unknown_references = [
             reference
             for reference in item.references
             if reference.status is ReferenceStatus.UNKNOWN
         ]
-        if unknown_references:
+        if not has_title and unknown_references:
             widgets.append(
                 _decorated_text(
-                    "Unidentified",
                     "\n".join(
                         f'"{reference.mention}" (turn {reference.turn_ref}) '
                         "could not be identified from the transcript"
                         for reference in unknown_references
                     ),
+                    top_label="Unidentified",
                 )
             )
 
-        if bundle.enriched and enriched_item.matches:
-            context_text = "\n".join(
-                f"{match.source_name}: {match.title}" for match in enriched_item.matches
-            )
-            widgets.append(_decorated_text("Related context", context_text))
-        sections.append({"widgets": widgets})
+        widgets.append(
+            {
+                "buttonList": {
+                    "buttons": [
+                        _action_button(
+                            icon="check",
+                            alt_text="Accept",
+                            function="accept_item",
+                            conference_id=conference_id,
+                            item_index=item_index,
+                        ),
+                        _action_button(
+                            icon="close",
+                            alt_text="Decline",
+                            function="decline_item",
+                            conference_id=conference_id,
+                            item_index=item_index,
+                        ),
+                    ]
+                }
+            }
+        )
+        sections.append(
+            {
+                "collapsible": True,
+                "uncollapsibleWidgetsCount": 1,
+                "widgets": widgets,
+            }
+        )
 
+    sections.append({"widgets": [_decorated_text("Only visible to you", start_icon="lock")]})
     return {
-        "cardId": f"weave-{bundle.conference_record_id.rsplit('/', 1)[-1]}",
-        "card": {
-            "header": {
-                "title": f"Your action items from {bundle.meeting_date.isoformat()}",
-                "subtitle": bundle.conference_record_id,
-            },
-            "sections": sections,
-        },
+        "cardId": f"weave-{conference_id}",
+        "card": {"header": header, "sections": sections},
     }

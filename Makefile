@@ -1,4 +1,4 @@
-.PHONY: install lint test eval web demo onboard build-subscription-image infra-init infra-plan infra-pass1 infra-pass2
+.PHONY: install lint test eval web demo onboard backfill-embeddings build-subscription-image infra-init infra-plan infra-pass1 infra-pass2
 
 TRANSCRIPT ?= samples/standup.txt
 EVAL_DELAY_SECONDS ?= 25
@@ -33,6 +33,9 @@ onboard:
 	@test -n "$(USER_ID)" || (echo "USER_ID is required" && exit 1)
 	uv run python scripts/onboard.py --email "$(EMAIL)" --user-id "$(USER_ID)" \
 	  $(if $(DM_SPACE),--dm-space "$(DM_SPACE)",) $(if $(PROJECT_ID),--project "$(PROJECT_ID)",)
+
+backfill-embeddings:
+	uv run python scripts/backfill_embeddings.py $(if $(PROJECT_ID),--project "$(PROJECT_ID)",)
 
 IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
 PROJECT_ID ?= $(shell cd infra && $(TF) output -raw project_id 2>/dev/null)

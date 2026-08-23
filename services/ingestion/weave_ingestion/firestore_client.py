@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
@@ -53,8 +54,13 @@ class OnboardedUser(BaseModel):
 class MeetingLedger:
     """Wrap pipeline and onboarding collections; the client is injectable."""
 
-    def __init__(self, client: Any | None = None) -> None:
+    def __init__(
+        self,
+        client: Any | None = None,
+        embed_documents_fn: Callable[[Sequence[str]], list[list[float]]] | None = None,
+    ) -> None:
         self._client = client
+        self._embed_documents_fn = embed_documents_fn
 
     @property
     def client(self) -> Any:
@@ -187,23 +193,49 @@ class MeetingLedger:
         visible_to: list[str],
     ) -> None:
         """Persist items with the meeting's attendee list as the ACL."""
+        from google.cloud.firestore_v1.vector import Vector
+
+        from weave_ingestion.embeddings import DIMENSIONS, embed_documents
+
         now = datetime.now(UTC)
         collection = self.client.collection(ACTION_ITEMS)
-        for bundle in bundles:
-            for index, enriched in enumerate(bundle.items):
-                item = enriched.item
-                collection.document(f"{conference_id}--{bundle.owner_email}--{index}").set(
-                    {
-                        "conference_record_id": conference_id,
-                        "description": item.description,
-                        "source_text": item.source_text,
-                        "references": [
-                            reference.model_dump(mode="json") for reference in item.references
-                        ],
-                        "owner_email": bundle.owner_email,
-                        "status": item.status.value,
-                        "deadline": item.deadline.isoformat() if item.deadline else None,
-                        "visible_to": visible_to,
-                        "created_at": now,
-                    }
-                )
+        rows = [
+            (bundle, index, enriched)
+            for bundle in bundles
+            for index, enriched in enumerate(bundle.items)
+        ]
+        texts = [
+            f"{enriched.title or enriched.item.description}\n{enriched.details or ''}"
+            for _, _, enriched in rows
+        ]
+        vectors: list[list[float]] | None = None
+        if texts:
+            try:
+                vectors = (self._embed_documents_fn or embed_documents)(texts)
+                if len(vectors) != len(texts) or any(
+                    len(vector) != DIMENSIONS for vector in vectors
+                ):
+                    raise ValueError("embedding response shape does not match action items")
+            except Exception:  # noqa: BLE001 - history writes survive embedding outages
+                logger.exception("action-item embedding failed; writing lexical history only")
+                vectors = None
+
+        for row_index, (bundle, index, enriched) in enumerate(rows):
+            item = enriched.item
+            document = {
+                "conference_record_id": conference_id,
+                "description": item.description,
+                "source_text": item.source_text,
+                "references": [reference.model_dump(mode="json") for reference in item.references],
+                "owner_email": bundle.owner_email,
+                "status": item.status.value,
+                "deadline": item.deadline.isoformat() if item.deadline else None,
+                "title": enriched.title,
+                "details": enriched.details,
+                "meeting_date": bundle.meeting_date.isoformat(),
+                "visible_to": visible_to,
+                "created_at": now,
+            }
+            if vectors is not None:
+                document["embedding"] = Vector(vectors[row_index])
+            collection.document(f"{conference_id}--{bundle.owner_email}--{index}").set(document)

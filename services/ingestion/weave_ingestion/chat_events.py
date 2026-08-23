@@ -41,6 +41,17 @@ class ChatEvent(BaseModel):
     space_name: str
 
 
+class ChatClickEvent(BaseModel):
+    """A deliberately non-mutating action-card click."""
+
+    model_config = ConfigDict(frozen=True)
+
+    function: str
+    conference_id: str | None = None
+    item_index: str | None = None
+    user_id: str
+
+
 def _is_direct_message(space: dict[str, Any]) -> bool:
     return (
         bool(space.get("singleUserBotDm"))
@@ -63,10 +74,65 @@ def _unwrap(payload: dict[str, Any]) -> tuple[Kind, Any, Any] | None:
     return (kind, payload.get("user"), payload.get("space")) if kind else None
 
 
-def parse_chat_event(payload: Any) -> ChatEvent | None:
+def _parameters(value: Any) -> dict[str, str]:
+    if isinstance(value, dict):
+        return {str(key): str(item) for key, item in value.items()}
+    if isinstance(value, list):
+        return {
+            str(item.get("key")): str(item.get("value"))
+            for item in value
+            if isinstance(item, dict) and item.get("key") is not None
+        }
+    return {}
+
+
+def _parse_click(payload: dict[str, Any]) -> ChatClickEvent | None:
+    chat = payload.get("chat") if isinstance(payload.get("chat"), dict) else None
+    is_addon_click = chat is not None and isinstance(chat.get("buttonClickedPayload"), dict)
+    is_classic_click = (payload.get("type") or payload.get("eventType")) == "CARD_CLICKED"
+    if not is_addon_click and not is_classic_click:
+        return None
+
+    user = chat.get("user") if chat is not None else payload.get("user")
+    if not isinstance(user, dict) or user.get("type") == "BOT":
+        return None
+    user_name = user.get("name")
+    if not isinstance(user_name, str) or not user_name.startswith("users/"):
+        return None
+    user_id = user_name.removeprefix("users/")
+    if not user_id.isdigit():
+        return None
+
+    if chat is not None:
+        common = payload.get("commonEventObject")
+        common = common if isinstance(common, dict) else {}
+        button = chat.get("buttonClickedPayload") or {}
+        action = button.get("action") if isinstance(button, dict) else {}
+        action = action if isinstance(action, dict) else {}
+        function = common.get("invokedFunction") or action.get("function")
+        parameters = _parameters(common.get("parameters") or action.get("parameters"))
+    else:
+        action = payload.get("action")
+        action = action if isinstance(action, dict) else {}
+        function = action.get("actionMethodName") or action.get("function")
+        parameters = _parameters(action.get("parameters"))
+
+    if not isinstance(function, str) or not function:
+        return None
+    return ChatClickEvent(
+        function=function,
+        conference_id=parameters.get("conference_id"),
+        item_index=parameters.get("item_index"),
+        user_id=user_id,
+    )
+
+
+def parse_chat_event(payload: Any) -> ChatEvent | ChatClickEvent | None:
     """Return an onboarding lifecycle event, or None for an acknowledged no-op."""
     if not isinstance(payload, dict):
         return None
+    if click := _parse_click(payload):
+        return click
     unwrapped = _unwrap(payload)
     if unwrapped is None:
         return None

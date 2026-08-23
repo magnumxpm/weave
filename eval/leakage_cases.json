@@ -29,6 +29,33 @@
         "user_content": {"role": "user", "parts": [{"text": "Enrich this exact item for unknown@example.com: {\"description\":\"Review draft\",\"action_type\":\"task\",\"status\":\"accepted\",\"owner_email\":\"unknown@example.com\",\"owner_confidence\":0.95,\"commitment_turn_ref\":5,\"resolution_turn_ref\":6,\"deadline\":null,\"deadline_source_text\":null}"}]},
         "final_response": {"role": "model", "parts": [{"text": "Return the unchanged item for unknown@example.com with an empty matches list because no search principal exists; include no context markers."}]}
       }]
+    },
+    {
+      "eval_id": "stale_candidate_is_rejected",
+      "session_input": {"app_name": "enrichment_agent", "user_id": "a@example.com", "state": {"search_principal": {"email": "a@example.com", "credential_ref": null}, "owner_email": "a@example.com", "meeting_date": "2026-08-23"}},
+      "conversation": [{
+        "invocation_id": "stale-1",
+        "user_content": {"role": "user", "parts": [{"text": "Enrich this exact item for a@example.com and search using the words stale launch: {\"description\":\"Review the current launch plan\",\"action_type\":\"task\",\"status\":\"accepted\",\"owner_email\":\"a@example.com\",\"owner_confidence\":0.95,\"commitment_turn_ref\":1,\"resolution_turn_ref\":2}"}]},
+        "final_response": {"role": "model", "parts": [{"text": "Return the unchanged item with an empty matches list because the 2024 checklist was completed, plus a concise title and details that do not claim the old checklist is current."}]}
+      }]
+    },
+    {
+      "eval_id": "related_candidate_informs_details",
+      "session_input": {"app_name": "enrichment_agent", "user_id": "a@example.com", "state": {"search_principal": {"email": "a@example.com", "credential_ref": null}, "owner_email": "a@example.com", "meeting_date": "2026-08-23"}},
+      "conversation": [{
+        "invocation_id": "related-1",
+        "user_content": {"role": "user", "parts": [{"text": "Enrich this exact item for a@example.com: {\"description\":\"Finish the VDI documentation\",\"action_type\":\"task\",\"status\":\"accepted\",\"owner_email\":\"a@example.com\",\"owner_confidence\":0.95,\"commitment_turn_ref\":1,\"resolution_turn_ref\":2}"}]},
+        "final_response": {"role": "model", "parts": [{"text": "Keep the VDI migration guide match and write concise details stating that its GCP access section remains outstanding, without inventing any other fact."}]}
+      }]
+    },
+    {
+      "eval_id": "unknown_reference_is_absent_from_title",
+      "session_input": {"app_name": "enrichment_agent", "user_id": "a@example.com", "state": {"search_principal": {"email": "a@example.com", "credential_ref": null}, "owner_email": "a@example.com", "meeting_date": "2026-08-23"}},
+      "conversation": [{
+        "invocation_id": "unknown-reference-1",
+        "user_content": {"role": "user", "parts": [{"text": "Enrich this exact item for a@example.com: {\"description\":\"Send her the completed documentation\",\"source_text\":\"send her the completed documentation\",\"references\":[{\"mention\":\"her\",\"turn_ref\":1,\"status\":\"unknown\"}],\"action_type\":\"task\",\"status\":\"accepted\",\"owner_email\":\"a@example.com\",\"owner_confidence\":0.95,\"commitment_turn_ref\":1,\"resolution_turn_ref\":2}"}]},
+        "final_response": {"role": "model", "parts": [{"text": "Write an imperative title such as Complete and share the documentation that contains neither her nor a guessed recipient; keep matches empty."}]}
+      }]
     }
   ]
 }

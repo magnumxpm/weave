@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pytest
@@ -18,13 +18,20 @@ from weave_common import (
 from weave_ingestion.delivery import (
     ChatDeliverer,
     GeminiEnterpriseDeliverer,
+    MeetingHeader,
     build_card,
 )
 from weave_ingestion.firestore_client import OnboardedUser
 from weave_ingestion.main import _build_welcome_sender
 
 
-def bundle(*, enriched: bool = True, deadline: date | None = date(2026, 8, 29)):
+def bundle(
+    *,
+    enriched: bool = True,
+    deadline: date | None = date(2026, 8, 29),
+    title: str | None = "Send the launch report",
+    details: str | None = "Send the final report to the launch group.",
+):
     item = ActionItem(
         description="Send the launch report",
         action_type=ActionType.TASK,
@@ -42,6 +49,8 @@ def bundle(*, enriched: bool = True, deadline: date | None = date(2026, 8, 29)):
         items=[
             EnrichedActionItem(
                 item=item,
+                title=title,
+                details=details,
                 matches=(
                     [
                         ContextMatch(
@@ -66,38 +75,48 @@ def widget_texts(card: dict[str, Any]) -> list[str]:
         widget["decoratedText"]["text"]
         for section in card["card"]["sections"]
         for widget in section["widgets"]
+        if "decoratedText" in widget
     ]
 
 
 def test_build_card_renders_card_v2_contract() -> None:
-    card = build_card(bundle())
-    assert card["cardId"] == "weave-abc"
-    assert card["card"]["header"]["title"] == "Your action items from 2026-08-22"
-    assert len(card["card"]["sections"]) == 1
-    labels = [
-        widget["decoratedText"]["topLabel"]
-        for section in card["card"]["sections"]
-        for widget in section["widgets"]
-    ]
-    assert "Commitment turn" not in labels
-    assert "prior_meetings: Earlier launch report" in widget_texts(card)
-
-
-def test_related_context_is_omitted_when_there_is_nothing_to_show() -> None:
-    unavailable = build_card(bundle(enriched=False))
-    no_matches_bundle = bundle().model_copy(
-        update={"items": [bundle().items[0].model_copy(update={"matches": []})]}
+    meeting = MeetingHeader(
+        title="Weekly support sync",
+        started_at=datetime(2026, 8, 22, 22, 2, tzinfo=UTC),
+        participant_names=("Srija", "Pritam", "Andrei"),
     )
-    for card in (unavailable, build_card(no_matches_bundle)):
-        labels = [
-            widget["decoratedText"]["topLabel"]
-            for section in card["card"]["sections"]
-            for widget in section["widgets"]
-        ]
-        assert "Related context" not in labels
+    card = build_card(bundle(), meeting)
+    assert card["cardId"] == "weave-abc"
+    assert card["card"]["header"] == {
+        "title": "Action items for you",
+        "subtitle": "Weekly support sync • 22:02",
+    }
+    assert widget_texts(card)[0] == "with Srija, Pritam, and 1 more"
+    item_section = card["card"]["sections"][1]
+    assert item_section["collapsible"] is True
+    assert item_section["uncollapsibleWidgetsCount"] == 1
+    assert item_section["widgets"][0]["decoratedText"]["text"] == "1. Send the launch report"
+    assert item_section["widgets"][1]["decoratedText"]["topLabel"] == "Details"
+    assert widget_texts(card)[-1] == "Only visible to you"
 
 
-def test_unidentified_mentions_are_shown_only_when_present() -> None:
+def test_retrieved_context_is_never_shown_to_the_reader() -> None:
+    card_text = "\n".join(widget_texts(build_card(bundle())))
+    assert "Earlier launch report" not in card_text
+    assert "prior_meetings" not in card_text
+
+
+def test_card_falls_back_to_the_extracted_description() -> None:
+    card = build_card(bundle(enriched=False, title=None, details=None))
+    item_section = card["card"]["sections"][0]
+    assert item_section["widgets"][0]["decoratedText"]["text"] == "1. Send the launch report"
+    assert all(
+        widget.get("decoratedText", {}).get("topLabel") != "Details"
+        for widget in item_section["widgets"]
+    )
+
+
+def test_unidentified_mentions_are_only_shown_for_an_untitled_fallback() -> None:
     resolved_card = build_card(bundle())
     unknown = Reference(mention="them", turn_ref=7, status=ReferenceStatus.UNKNOWN)
     original_item = bundle().items[0].item
@@ -113,16 +132,22 @@ def test_unidentified_mentions_are_shown_only_when_present() -> None:
         }
     )
 
-    assert "Unidentified" not in [
-        widget["decoratedText"]["topLabel"]
-        for section in resolved_card["card"]["sections"]
-        for widget in section["widgets"]
-    ]
+    assert "Unidentified" not in "\n".join(widget_texts(resolved_card))
+    fallback = unknown_bundle.model_copy(
+        update={
+            "items": [unknown_bundle.items[0].model_copy(update={"title": None, "details": None})]
+        }
+    )
     unidentified = [
         widget["decoratedText"]
+        for section in build_card(fallback)["card"]["sections"]
+        for widget in section["widgets"]
+        if widget.get("decoratedText", {}).get("topLabel") == "Unidentified"
+    ]
+    assert "Unidentified" not in [
+        widget.get("decoratedText", {}).get("topLabel")
         for section in build_card(unknown_bundle)["card"]["sections"]
         for widget in section["widgets"]
-        if widget["decoratedText"]["topLabel"] == "Unidentified"
     ]
     assert unidentified == [
         {
@@ -136,11 +161,29 @@ def test_unidentified_mentions_are_shown_only_when_present() -> None:
 def test_deadline_is_omitted_when_absent() -> None:
     card = build_card(bundle(deadline=None))
     labels = [
-        widget["decoratedText"]["topLabel"]
+        widget.get("decoratedText", {}).get("topLabel")
         for section in card["card"]["sections"]
         for widget in section["widgets"]
     ]
     assert "Deadline" not in labels
+
+
+def test_buttons_have_accessible_labels_and_stable_action_parameters() -> None:
+    item_section = build_card(bundle())["card"]["sections"][0]
+    buttons = item_section["widgets"][-1]["buttonList"]["buttons"]
+    assert [button["altText"] for button in buttons] == ["Accept", "Decline"]
+    assert [button["onClick"]["action"]["function"] for button in buttons] == [
+        "accept_item",
+        "decline_item",
+    ]
+    assert buttons[0]["onClick"]["action"]["parameters"] == [
+        {"key": "conference_id", "value": "abc"},
+        {"key": "item_index", "value": "1"},
+    ]
+
+
+def test_header_renders_without_meeting_metadata() -> None:
+    assert build_card(bundle())["card"]["header"] == {"title": "Action items for you"}
 
 
 class Request:

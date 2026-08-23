@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
+from datetime import date
 
 from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
@@ -53,6 +54,7 @@ def make_run_enrichment(
         owner_items: list[ActionItem],
         *,
         conference_record_id: str = "",
+        meeting_date: date | None = None,
     ) -> OwnerItemList:
         runner = InMemoryRunner(agent=agent, app_name="weave_enrichment")
         session = runner.session_service.create_session_sync(
@@ -65,6 +67,7 @@ def make_run_enrichment(
                 # Read by the context tool to keep this meeting out of its own
                 # results, and by log_enrichment_scope.
                 "conference_record_id": conference_record_id,
+                "meeting_date": meeting_date.isoformat() if meeting_date else None,
             },
         )
         prompt = OwnerItemList(
@@ -72,6 +75,9 @@ def make_run_enrichment(
             items=[],
         ).model_dump_json()
         serialized_items = ",".join(item.model_dump_json() for item in owner_items)
+        prompt += (
+            f"\nCurrent meeting date: {meeting_date.isoformat() if meeting_date else 'unknown'}"
+        )
         prompt += f"\nAction items: [{serialized_items}]"
         events = list(
             runner.run(

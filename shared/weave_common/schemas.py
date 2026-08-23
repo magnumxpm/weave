@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -143,11 +143,14 @@ class ContextMatch(FrozenModel):
     snippet: str
     ref: str | None = None
     score: float | None = Field(default=None, ge=0.0, le=1.0)
+    occurred_on: date | None = None
 
 
 class EnrichedActionItem(FrozenModel):
     item: ActionItem
     matches: list[ContextMatch] = Field(default_factory=list)
+    title: str | None = Field(default=None, max_length=160)
+    details: str | None = Field(default=None, max_length=700)
 
 
 class OwnerItemList(FrozenModel):
@@ -177,6 +180,8 @@ class PipelineRequest(FrozenModel):
     conference_record_id: str
     meeting_date: date
     attendees: list[Attendee]
+    meeting_title: str | None = None
+    started_at: datetime | None = None
 
 
 class PipelineResult(FrozenModel):

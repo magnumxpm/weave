@@ -126,6 +126,12 @@ def test_mark_records_delivery_outcomes_with_firestore_safe_keys() -> None:
 
 def test_action_item_persistence_includes_reference_provenance() -> None:
     client = Client()
+    embedded_texts: list[str] = []
+
+    def embed(texts: Any) -> list[list[float]]:
+        embedded_texts.extend(texts)
+        return [[0.25] * 768 for _ in texts]
+
     item = ActionItem(
         description="Follow up with Srija Ghosh",
         source_text="follow up with me",
@@ -149,11 +155,17 @@ def test_action_item_persistence_includes_reference_provenance() -> None:
         owner_email="owner@example.com",
         conference_record_id="conferenceRecords/one",
         meeting_date=date(2026, 8, 23),
-        items=[EnrichedActionItem(item=item)],
+        items=[
+            EnrichedActionItem(
+                item=item,
+                title="Resolve Srija's support request",
+                details="Check the open device ticket and follow up.",
+            )
+        ],
         enriched=True,
     )
 
-    MeetingLedger(client).write_action_items("one", [bundle], ["srija@example.com"])
+    MeetingLedger(client, embed).write_action_items("one", [bundle], ["srija@example.com"])
 
     stored = next(iter(client.collections[ACTION_ITEMS].values()))
     assert stored["source_text"] == "follow up with me"
@@ -167,3 +179,38 @@ def test_action_item_persistence_includes_reference_provenance() -> None:
             "confidence": 1.0,
         }
     ]
+    assert stored["title"] == "Resolve Srija's support request"
+    assert stored["details"] == "Check the open device ticket and follow up."
+    assert stored["meeting_date"] == "2026-08-23"
+    assert len(stored["embedding"]) == 768
+    assert embedded_texts == [
+        "Resolve Srija's support request\nCheck the open device ticket and follow up."
+    ]
+
+
+def test_action_item_embedding_failure_never_costs_the_history_write() -> None:
+    client = Client()
+    item = ActionItem(
+        description="Send the report",
+        action_type=ActionType.TASK,
+        status=CommitmentStatus.ACCEPTED,
+        owner_email="owner@example.com",
+        owner_confidence=1.0,
+        resolution_turn_ref=2,
+    )
+    bundle = EnrichedOwnerBundle(
+        owner_email="owner@example.com",
+        conference_record_id="conferenceRecords/one",
+        meeting_date=date(2026, 8, 23),
+        items=[EnrichedActionItem(item=item)],
+        enriched=True,
+    )
+
+    def fail(_: Any) -> list[list[float]]:
+        raise RuntimeError("embedding unavailable")
+
+    MeetingLedger(client, fail).write_action_items("one", [bundle], ["owner@example.com"])
+
+    stored = next(iter(client.collections[ACTION_ITEMS].values()))
+    assert stored["description"] == "Send the report"
+    assert "embedding" not in stored

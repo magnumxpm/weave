@@ -20,9 +20,9 @@ from fastapi import FastAPI, Request, Response
 from weave_common import PipelineRequest, PipelineResult
 
 from weave_ingestion.agent_client import AgentEngineClient
-from weave_ingestion.chat_events import parse_chat_event
+from weave_ingestion.chat_events import ChatClickEvent, parse_chat_event
 from weave_ingestion.config import Settings, settings_from_env
-from weave_ingestion.delivery.base import Deliverer
+from weave_ingestion.delivery.base import Deliverer, MeetingHeader
 from weave_ingestion.delivery.chat import ChatDeliverer
 from weave_ingestion.delivery.log import LogDeliverer
 from weave_ingestion.firestore_client import MeetingLedger, OnboardedUser
@@ -46,6 +46,7 @@ WelcomeSender = Callable[[OnboardedUser], None]
 
 DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.user.readonly"
 MEET_SCOPE = "https://www.googleapis.com/auth/meetings.space.readonly"
+DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
 
 
 def _ingestion_sa(settings: Settings) -> str:
@@ -74,7 +75,15 @@ def _build_live_source(settings: Settings, directory) -> MeetArtifactSource:
         credentials = delegated_credentials(subject, [MEET_SCOPE], _ingestion_sa(settings))
         return build("meet", "v2", credentials=credentials)
 
-    return LiveMeetArtifactSource(build_meet_service, directory.email_for_user_id)
+    def build_drive_service(subject: str):
+        credentials = delegated_credentials(subject, [DRIVE_SCOPE], _ingestion_sa(settings))
+        return build("drive", "v3", credentials=credentials)
+
+    return LiveMeetArtifactSource(
+        build_meet_service,
+        directory.email_for_user_id,
+        build_drive_service,
+    )
 
 
 def _build_chat_client():
@@ -151,6 +160,20 @@ def _build_welcome_sender() -> WelcomeSender:
         )
 
     return send
+
+
+def _meeting_header(request: PipelineRequest, owner_email: str) -> MeetingHeader:
+    owner = owner_email.strip().casefold()
+    participant_names = tuple(
+        attendee.display_name
+        for attendee in request.attendees
+        if attendee.email.strip().casefold() != owner
+    )
+    return MeetingHeader(
+        title=request.meeting_title,
+        started_at=request.started_at,
+        participant_names=participant_names,
+    )
 
 
 def create_app(
@@ -279,7 +302,12 @@ def create_app(
                     delivery_outcomes[owner] = "skipped_not_onboarded"
                     continue
                 try:
-                    deliverer.deliver(owner, bundle, target)
+                    deliverer.deliver(
+                        owner,
+                        bundle,
+                        target,
+                        meeting=_meeting_header(pipeline_request, owner),
+                    )
                     delivery_outcomes[owner] = "delivered"
                 except Exception:  # noqa: BLE001 - isolate one owner's delivery
                     logger.exception(
@@ -347,6 +375,18 @@ def create_app(
                     "event_type": envelope.get("type") or envelope.get("eventType"),
                     "payload_keys": sorted(envelope),
                     "space_type": space.get("spaceType") if isinstance(space, dict) else None,
+                },
+            )
+            return Response(status_code=200)
+
+        if isinstance(event, ChatClickEvent):
+            logger.info(
+                "Chat action-card click acknowledged",
+                extra={
+                    "function": event.function,
+                    "conference_id": event.conference_id,
+                    "item_index": event.item_index,
+                    "user_id": event.user_id,
                 },
             )
             return Response(status_code=200)

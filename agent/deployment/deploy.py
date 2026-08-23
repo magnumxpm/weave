@@ -26,6 +26,7 @@ REQUIREMENTS = [
     "google-cloud-aiplatform[agent_engines]==1.165.1",
     "google-cloud-firestore==2.28.1",
     "google-cloud-modelarmor==0.7.1",
+    "google-genai==2.19.0",
     "cloudpickle==3.1.2",
     "pydantic==2.13.4",
     "pyyaml==6.0.3",

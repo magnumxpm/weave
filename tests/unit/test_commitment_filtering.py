@@ -6,6 +6,7 @@ from weave_common import (
     ActionItem,
     ActionType,
     CommitmentStatus,
+    EnrichedActionItem,
     MeetingInsights,
 )
 
@@ -63,3 +64,10 @@ def test_owner_confidence_is_required() -> None:
     del values["owner_confidence"]
     with pytest.raises(ValidationError):
         ActionItem.model_validate(values)
+
+
+def test_enriched_display_fields_are_additive_and_length_bounded() -> None:
+    action = item(CommitmentStatus.ACCEPTED)
+    assert EnrichedActionItem(item=action).title is None
+    with pytest.raises(ValidationError):
+        EnrichedActionItem(item=action, details="x" * 701)

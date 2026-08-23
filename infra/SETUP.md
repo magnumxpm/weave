@@ -63,7 +63,7 @@ Notes:
 
 ```bash
 make infra-plan          # must converge to "No changes"
-gcloud firestore indexes composite list --project=<PROJECT_ID>   # index READY
+gcloud firestore indexes composite list --project=<PROJECT_ID>   # both indexes READY
 ```
 
 ## 5. Manual: domain-wide delegation (Workspace Admin Console — not Cloud Console)
@@ -210,6 +210,28 @@ Workspace → Google Meet), and check whether the explicit-consent policy for
 transcripts is enabled — if it is, a transcript only exists for meetings where a
 participant accepted the prompt.
 
+## 10. Semantic history and card UI rollout
+
+For an existing deployment, roll this schema change out in this order:
+
+1. Apply `google_firestore_index.action_items_vector` and wait until the index
+   reports `READY`. The `visible_to` ACL field and 768-dimensional vector field
+   deliberately live in the same index.
+2. Build and deploy ingestion. It can render old agent output using the
+   extracted description, and new writes include display prose and embeddings.
+3. Run `make backfill-embeddings PROJECT_ID=<PROJECT_ID>`.
+4. Deploy the updated agent, then update the configured Agent Engine id.
+
+Documents without an `embedding` field are invisible to vector search. The
+lexical fallback keeps searches available, but the backfill is a required
+rollout step rather than optional cleanup. Confirm that no action-item document
+lacks the field after it completes.
+
+The meeting agenda comes from the transcript document's Drive filename. That
+read is best-effort: a participant may not be able to read an organizer-owned
+document, in which case the card keeps the meeting time and omits the agenda.
+No additional DWD scope is required because `drive.readonly` is already granted.
+
 ## Traps hit while building this (all cost a debugging cycle)
 
 | Symptom | Cause | Fix |
@@ -234,3 +256,5 @@ participant accepted the prompt.
 | A loop variable before `:method` in a URL 404s in zsh | zsh reads `$var:g...` as a history modifier | brace it: `${var}:generateContent` |
 | Cards deliver with a header and no items | enrichment echoed the item inexactly, so the fingerprint gate dropped everything | the orchestrator falls back to an unenriched bundle; check `dropping out-of-scope enriched item` warnings |
 | Every meeting fails at `PipelineResult.model_validate` after an agent deploy | a schema-widening agent was deployed ahead of ingestion | deploy ingestion first, then redeploy the agent |
+| Semantic history always uses lexical fallback | vector index is not ready, query embeddings are failing, or old documents were never backfilled | inspect `prior-meeting search` logs, wait for index `READY`, then run `make backfill-embeddings` |
+| Recent action items never appear in semantic search | their documents have no `embedding` field | ingestion logs embedding failures without dropping history; repair credentials/quota and rerun the backfill |
