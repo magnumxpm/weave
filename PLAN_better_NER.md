@@ -74,14 +74,11 @@ class Reference(FrozenModel):
     display_name: str | None = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
-    @model_validator(mode="after")
-    def identity_matches_status(self) -> Reference:
-        if self.status is ReferenceStatus.RESOLVED:
-            if not self.email or not self.display_name:
-                raise ValueError("resolved references require email and display_name")
-        elif self.email or self.display_name:
-            raise ValueError("unknown references must not carry an identity")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def identity_matches_status(cls, data: Any) -> Any:
+        # Coerce, never raise: an identity that is not complete is no identity.
+        ...  # resolved without both fields -> unknown; unknown -> identity stripped
 ```
 
 `ActionItem` gains, all optional with defaults:
@@ -102,11 +99,17 @@ Three notes for whoever implements this:
   `extra="forbid"`, and every `ActionItem(...)` construction site in
   `test_delivery.py`, `test_commitment_filtering.py`, and `test_orchestrator.py`
   would otherwise break. It is also what makes the rollout order in §8 safe.
-- **The validator checks structure only, never confidence.** A `resolved`
-  reference carrying `confidence=0.7` must not raise: a raise here fails
-  `MeetingInsights` validation, which fails extraction, which loses the entire
-  meeting over one pronoun. Confidence gating is a *demotion*, and it lives in
-  §4 with the attendee check.
+- **The validator never raises — on structure or on confidence.** A response
+  schema cannot express "email is required only when status is resolved"
+  (`required` is `["mention", "turn_ref", "status"]` and cannot be conditional),
+  so the model is free to emit either inconsistency; and the prompt hands it a
+  tool result containing an email right before telling it to omit one. A raise
+  fails `MeetingInsights` validation, which fails extraction, which loses the
+  entire meeting — every owner, every item — over one pronoun. So a
+  half-identified reference is normalized to `unknown` rather than rejected, and
+  confidence gating is a *demotion* that lives in §4 with the attendee check.
+  `ground_references` is the enforcement of invariants 5 and 6, so a permissive
+  parse costs no safety.
 - **`commitment_turn_ref` stays in the schema.** Only its card widget goes
   (§5). It is provenance worth keeping and costs nothing; do not re-litigate.
 
@@ -115,8 +118,9 @@ instead of its literal `0.85`, so one number governs both owner resolution and
 reference resolution. Behaviour is unchanged.
 
 ✅ **Check:** `ActionItem(description=..., ...)` with no new fields still
-constructs. `Reference(status="resolved", email=None, ...)` raises;
-`Reference(status="unknown", email="a@b.c", ...)` raises.
+constructs. `Reference(status="resolved", email=None, ...)` comes back
+`unknown`; `Reference(status="unknown", email="a@b.c", ...)` comes back with no
+email; a `MeetingInsights` payload containing either parses rather than raising.
 
 ---
 

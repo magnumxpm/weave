@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 from enum import StrEnum
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -69,14 +70,28 @@ class Reference(FrozenModel):
     display_name: str | None = None
     confidence: float = Field(default=0.0, ge=0.0, le=1.0)
 
-    @model_validator(mode="after")
-    def identity_matches_status(self) -> Reference:
-        if self.status is ReferenceStatus.RESOLVED:
-            if not self.email or not self.display_name:
-                raise ValueError("resolved references require email and display_name")
-        elif self.email or self.display_name:
-            raise ValueError("unknown references must not carry an identity")
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def identity_matches_status(cls, data: Any) -> Any:
+        """Coerce a half-identified reference instead of rejecting it.
+
+        A response schema cannot say "email is required only when status is
+        resolved", so a model is free to emit either inconsistency. Raising
+        here would fail MeetingInsights validation and lose every item of
+        the meeting over one pronoun, so the inconsistency is resolved the
+        conservative way: an identity that is not complete is no identity.
+        `ground_references` still decides which surviving ones are trusted.
+        """
+        if not isinstance(data, dict):
+            return data
+        normalized = dict(data)
+        if normalized.get("status") == ReferenceStatus.RESOLVED and not (
+            normalized.get("email") and normalized.get("display_name")
+        ):
+            normalized["status"] = ReferenceStatus.UNKNOWN
+        if normalized.get("status") == ReferenceStatus.UNKNOWN:
+            normalized.update(email=None, display_name=None, confidence=0.0)
+        return normalized
 
 
 class ActionItem(FrozenModel):

@@ -3,12 +3,12 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
-from pydantic import ValidationError
 from weave_common import (
     ActionItem,
     ActionType,
     Attendee,
     CommitmentStatus,
+    MeetingInsights,
     Reference,
     ReferenceStatus,
 )
@@ -67,18 +67,40 @@ def test_display_name_is_taken_from_meet_not_the_model() -> None:
     assert grounded.confidence == 0.95
 
 
-def test_reference_status_requires_matching_identity_shape() -> None:
-    with pytest.raises(ValidationError):
-        Reference(
-            mention="her",
-            turn_ref=1,
-            status=ReferenceStatus.RESOLVED,
-            display_name="Sarah",
-        )
-    with pytest.raises(ValidationError):
-        Reference(
-            mention="them",
-            turn_ref=1,
-            status=ReferenceStatus.UNKNOWN,
-            email="someone@example.com",
-        )
+def test_half_identified_reference_normalizes_to_unknown() -> None:
+    half = Reference(
+        mention="her",
+        turn_ref=1,
+        status=ReferenceStatus.RESOLVED,
+        display_name="Sarah",
+        confidence=1.0,
+    )
+    assert half.status is ReferenceStatus.UNKNOWN
+    assert half.display_name is None
+    assert half.confidence == 0.0
+
+    stray = Reference(
+        mention="them",
+        turn_ref=1,
+        status=ReferenceStatus.UNKNOWN,
+        email="someone@example.com",
+    )
+    assert stray.email is None
+
+
+def test_an_inconsistent_reference_never_costs_the_meeting() -> None:
+    # Raising here would fail MeetingInsights validation, which fails
+    # extraction, which loses every item for every owner.
+    insights = MeetingInsights.model_validate(
+        {
+            "conference_record_id": "conferenceRecords/one",
+            "meeting_date": "2026-08-23",
+            "items": [
+                {
+                    **item_with(resolved()).model_dump(mode="json"),
+                    "references": [{"mention": "me", "turn_ref": 4, "status": "resolved"}],
+                }
+            ],
+        }
+    )
+    assert insights.items[0].references[0].status is ReferenceStatus.UNKNOWN
