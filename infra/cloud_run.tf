@@ -100,6 +100,16 @@ resource "google_cloud_run_v2_service_iam_member" "push_invoker" {
   member   = google_service_account.pubsub_push.member
 }
 
+# Agent Engine can reach only this Cloud Run service. The broker route then
+# verifies that exact service-account identity before any delegated read.
+resource "google_cloud_run_v2_service_iam_member" "agent_invoker" {
+  count    = var.create_cloud_run ? 1 : 0
+  name     = google_cloud_run_v2_service.ingestion[0].name
+  location = var.region
+  role     = "roles/run.invoker"
+  member   = google_service_account.agent.member
+}
+
 resource "google_pubsub_subscription" "meet_artifacts_push" {
   count                = var.create_cloud_run ? 1 : 0
   name                 = "meet-artifacts-push"

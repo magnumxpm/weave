@@ -1938,6 +1938,7 @@ dependencies = [
     { name = "google-cloud-modelarmor" },
     { name = "google-genai" },
     { name = "pyyaml" },
+    { name = "requests" },
     { name = "weave-common" },
 ]
 
@@ -1957,6 +1958,7 @@ requires-dist = [
     { name = "google-cloud-modelarmor", specifier = ">=0.2.0" },
     { name = "google-genai", specifier = ">=2.19.0" },
     { name = "pyyaml", specifier = ">=6.0.2" },
+    { name = "requests", specifier = ">=2.32.0" },
     { name = "weave-common", editable = "shared" },
 ]
 

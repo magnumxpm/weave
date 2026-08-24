@@ -72,7 +72,7 @@ https://admin.google.com/ac/owl/domainwidedelegation → **Add new**, twice:
 
 | Client ID (Terraform output) | Scopes (comma-separated, one line) |
 |---|---|
-| `ingestion_sa_unique_id` | `https://www.googleapis.com/auth/meetings.space.readonly,https://www.googleapis.com/auth/drive.readonly,https://www.googleapis.com/auth/admin.directory.user.readonly` |
+| `ingestion_sa_unique_id` | `https://www.googleapis.com/auth/meetings.space.readonly,https://www.googleapis.com/auth/drive.readonly,https://www.googleapis.com/auth/admin.directory.user.readonly,https://www.googleapis.com/auth/tasks.readonly` |
 | `subscriptions_sa_unique_id` | `https://www.googleapis.com/auth/meetings.space.readonly` |
 
 Propagation takes minutes; `403 unauthorized_client` afterwards means wait.
@@ -121,8 +121,16 @@ authority used to read Meet data; adding the app grants no new data permissions.
 ```bash
 export PROJECT_ID=<PROJECT_ID> REGION=us-central1
 export AGENT_SA=weave-agent-sa@$PROJECT_ID.iam.gserviceaccount.com
-make deploy-agent            # prints AGENT_ENGINE_ID=projects/.../reasoningEngines/N
+make deploy-agent BOOTSTRAP_WITHOUT_CONTEXT_BROKER=1
+# prints AGENT_ENGINE_ID=projects/.../reasoningEngines/N
 ```
+
+`make deploy-agent` reads `CONTEXT_BROKER_URL` and `CONTEXT_BROKER_AUDIENCE`
+from Terraform outputs and normally fails if either is absent. The explicit bootstrap
+flag above is only for the initial dependency cycle: those first-pass sources safely
+return no Google matches until ingestion exists. All subsequent agent deployments must
+use the populated outputs. Explicit environment values may be supplied when deploying
+against a different reviewed environment.
 
 **Model names are backend-specific.** Agent Engine runs on Vertex, which serves
 a different catalogue than AI Studio: `gemini-3.x` names resolve with an API key
@@ -231,6 +239,30 @@ The meeting agenda comes from the transcript document's Drive filename. That
 read is best-effort: a participant may not be able to read an organizer-owned
 document, in which case the card keeps the meeting time and omits the agenda.
 No additional DWD scope is required because `drive.readonly` is already granted.
+
+## 11. Google Docs and Tasks context rollout
+
+Owner-visible Drive files and open Google Tasks are searched through the ingestion
+context broker. The Agent Engine service account has only `run.invoker` on ingestion
+and still has no delegation. Roll out in this order:
+
+1. Apply Terraform to enable the Tasks API and grant the agent service account
+   `run.invoker` on ingestion.
+2. In Workspace Admin domain-wide delegation, edit the existing ingestion service
+   account entry and replace its scopes with the full four-scope line from §5.
+   Editing replaces rather than appends; allow several minutes for propagation.
+3. Build and deploy ingestion so `/context/search` is live. An unauthenticated POST
+   must return 403. Verify Drive and Tasks delegated reads independently for one
+   onboarded test user.
+4. Deploy Agent Engine with `make deploy-agent`, then update the configured engine id.
+   Check immediately for `fetch_id_token` failures. If Agent Engine cannot use its
+   metadata identity endpoint, add a narrowly scoped self-signing fallback only after
+   verifying that limitation; do not grant delegation to the agent.
+5. Replay a test meeting after creating a clearly related document and task. Broker
+   logs should name the owner subject, source, and result count but never the query.
+
+A non-onboarded attendee receives no Docs or Tasks context. Any broker, API, or source
+failure degrades to no results from that source and does not stop the other sources.
 
 ## Traps hit while building this (all cost a debugging cycle)
 

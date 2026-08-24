@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from agent.context_sources.relevance import keys, rank
+from weave_common import rank, terms
+
+from agent.context_sources.relevance import keys
+from agent.context_sources.relevance import rank as legacy_rank
 
 # The stored descriptions this ranking was measured against.
 CORPUS = [
@@ -40,3 +43,24 @@ def test_scores_are_ordered_and_within_the_contextmatch_range() -> None:
     scores = [score for _, score in ranked]
     assert scores == sorted(scores, reverse=True)
     assert all(0.0 < score <= 1.0 for score in scores)
+
+
+def test_legacy_and_shared_import_paths_are_identical() -> None:
+    assert legacy_rank("send device email", CORPUS) == rank("send device email", CORPUS)
+
+
+def test_terms_keep_short_acronyms_that_a_length_ordering_would_bury() -> None:
+    """Acronyms are the most discriminating terms here, and the shortest.
+
+    An earlier version ordered terms by length before a caller capped the list,
+    which dropped exactly `vdi` and `gcp` and searched only generic words.
+    """
+    extracted = terms(
+        "Complete the documentation detailing your experience with VDI and GCP "
+        "migration for the HR onboarding team review"
+    )
+
+    assert "vdi" in extracted[:12]
+    assert "gcp" in extracted[:12]
+    assert extracted[0] == "complete"  # source order, not length order
+    assert "the" not in extracted and "your" not in extracted

@@ -28,3 +28,18 @@ make test
 
 LLM checks are intentionally separate from hermetic unit tests. Set `GOOGLE_API_KEY` (or the
 documented Vertex variables in `.env.example`) before running `make eval` or `make demo`.
+
+## Future scope
+
+Context sources are currently Google-only: prior meeting action items plus owner-visible
+Docs/Drive files and the owner's open Google Tasks. Delegated Google reads go through an
+authenticated ingestion context broker; Agent Engine never receives domain-wide delegation.
+External connectors (Jira, Confluence, and other
+OAuth-capable services) are deferred but designed for: each becomes a `ContextSource`
+behind the same registry, authorized per user via OAuth 2.0 authorization-code flow — one
+registered app per provider, per-user refresh tokens stored in Secret Manager on a
+per-service basis, with only the secret's name carried on the onboarding record and passed
+through `SearchPrincipal.credential_ref`. Consent is collected through a "connect" card in
+the existing Chat DM plus an OAuth callback route on the ingestion service, generalizing to
+N providers without agent-side credential handling. Google Issue Tracker (Buganizer) stays
+out of scope entirely: it exposes no public API.

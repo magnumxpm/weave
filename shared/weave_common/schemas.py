@@ -35,6 +35,8 @@ class ActionType(StrEnum):
 class MatchType(StrEnum):
     EXISTING_PRIOR_ITEM = "existing_prior_item"
     RELATED_DISCUSSION = "related_discussion"
+    RELATED_DOCUMENT = "related_document"
+    OPEN_TASK = "open_task"
     NONE = "none"
 
 

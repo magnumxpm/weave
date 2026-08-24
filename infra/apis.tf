@@ -16,6 +16,7 @@ locals {
     "pubsub.googleapis.com",
     "run.googleapis.com",
     "secretmanager.googleapis.com",
+    "tasks.googleapis.com",
     "workspaceevents.googleapis.com",
   ]
 }

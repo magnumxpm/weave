@@ -10,6 +10,10 @@ output "ingestion_url" {
   value = var.create_cloud_run ? google_cloud_run_v2_service.ingestion[0].uri : ""
 }
 
+output "pubsub_push_audience" {
+  value = var.pubsub_push_audience
+}
+
 output "ingestion_sa_email" {
   value = google_service_account.ingestion.email
 }

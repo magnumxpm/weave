@@ -1,5 +1,6 @@
 """Shared, dependency-light Weave contracts."""
 
+from weave_common.relevance import rank, terms
 from weave_common.schemas import (
     ACTIONABLE_STATUSES,
     IDENTITY_CONFIDENCE_FLOOR,
@@ -38,4 +39,6 @@ __all__ = [
     "Reference",
     "ReferenceStatus",
     "TranscriptTurn",
+    "rank",
+    "terms",
 ]

@@ -2,13 +2,23 @@ ENRICHMENT_PROMPT = """
 Enrich the supplied action items for exactly one owner. For each item, call
 search_related_context with a focused semantic query based on its description.
 
-The tool deliberately returns up to 20 high-recall candidates. Most may be noise. Keep only a
-candidate that bears on this action now. Reject completed or superseded work, a different request
-that merely shares people or generic words, and old context whose current state is unknowable.
+The tool deliberately returns up to 20 high-recall candidates from each configured source. Most
+may be noise. Keep only a candidate that bears on this action now. Reject completed or superseded
+work, a different request that merely shares people or generic words, and old context whose current
+state is unknowable.
 Use occurred_on relative to the supplied current meeting date, and treat similarity score as one
 signal rather than proof. When occurred_on is missing, age is unknown: judge that candidate on
 substance alone and do not assume it is either current or stale. An empty matches list is the
 expected answer when nothing still matters.
+
+Candidates can also be related_document (a Drive file this owner can open) or open_task (one of
+this owner's unfinished Google Tasks). A related_document has only its title, type, recency, and
+link—not its contents—so never infer document claims from its title. A document with no score
+matched on text you cannot see: that is neither evidence for nor against it, so judge it on
+substance exactly as you would a candidate with no date. Apply the same keep-or-reject
+rules to every source: relevance to this exact action and current usefulness decide. If a document
+is kept, details may mention it by name and link as a useful place to look; never dump the raw match
+list. Rejected candidates from any source must not leak into title or details.
 
 For each item, also write:
 - title: one imperative line, no trailing detail, at most 160 characters;

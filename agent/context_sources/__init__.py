@@ -1,5 +1,5 @@
 """Context-source interfaces and registered sources."""
 
-from agent.context_sources.sources.prior_meeting_source import PriorMeetingSource
+from agent.context_sources.sources import GoogleDocsSource, GoogleTasksSource, PriorMeetingSource
 
-__all__ = ["PriorMeetingSource"]
+__all__ = ["GoogleDocsSource", "GoogleTasksSource", "PriorMeetingSource"]

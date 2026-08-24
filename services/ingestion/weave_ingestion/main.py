@@ -17,6 +17,8 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from weave_common import PipelineRequest, PipelineResult
 
 from weave_ingestion.agent_client import AgentEngineClient
@@ -26,6 +28,13 @@ from weave_ingestion.delivery.base import Deliverer, MeetingHeader
 from weave_ingestion.delivery.chat import ChatDeliverer
 from weave_ingestion.delivery.log import LogDeliverer
 from weave_ingestion.firestore_client import MeetingLedger, OnboardedUser
+from weave_ingestion.google_sources import (
+    DRIVE_SCOPE,
+    MAX_LIMIT,
+    MAX_QUERY_CHARS,
+    TASKS_SCOPE,
+    GoogleSourceBroker,
+)
 from weave_ingestion.logging_config import configure_logging
 from weave_ingestion.meet_client import (
     FixtureMeetArtifactSource,
@@ -34,7 +43,7 @@ from weave_ingestion.meet_client import (
     extract_subscriber_user_id,
 )
 from weave_ingestion.model_armor import TranscriptScreen
-from weave_ingestion.oidc import PushAuthError, verify_push_token
+from weave_ingestion.oidc import PushAuthError, verify_caller_token, verify_push_token
 
 logger = logging.getLogger(__name__)
 
@@ -46,11 +55,25 @@ WelcomeSender = Callable[[OnboardedUser], None]
 
 DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.user.readonly"
 MEET_SCOPE = "https://www.googleapis.com/auth/meetings.space.readonly"
-DRIVE_SCOPE = "https://www.googleapis.com/auth/drive.readonly"
+
+
+class ContextSearchRequest(BaseModel):
+    """Strict, intentionally small request accepted by the context broker."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    source: str
+    query: str
+    principal_email: str
+    limit: int = Field(default=5)
 
 
 def _ingestion_sa(settings: Settings) -> str:
     return f"weave-ingestion-sa@{settings.project_id}.iam.gserviceaccount.com"
+
+
+def _agent_sa(settings: Settings) -> str:
+    return f"weave-agent-sa@{settings.project_id}.iam.gserviceaccount.com"
 
 
 def _build_directory(settings: Settings):
@@ -84,6 +107,22 @@ def _build_live_source(settings: Settings, directory) -> MeetArtifactSource:
         directory.email_for_user_id,
         build_drive_service,
     )
+
+
+def _build_google_source_broker(settings: Settings) -> GoogleSourceBroker:
+    from googleapiclient.discovery import build
+
+    from weave_ingestion.google_auth import delegated_credentials
+
+    def build_drive_service(subject: str):
+        credentials = delegated_credentials(subject, [DRIVE_SCOPE], _ingestion_sa(settings))
+        return build("drive", "v3", credentials=credentials)
+
+    def build_tasks_service(subject: str):
+        credentials = delegated_credentials(subject, [TASKS_SCOPE], _ingestion_sa(settings))
+        return build("tasks", "v1", credentials=credentials)
+
+    return GoogleSourceBroker(build_drive_service, build_tasks_service)
 
 
 def _build_chat_client():
@@ -188,6 +227,8 @@ def create_app(
     resolve_subject_email: Callable[[str], str] | None = None,
     trigger_sweep: TriggerSweep | None = None,
     welcome_sender: WelcomeSender | None = None,
+    broker: GoogleSourceBroker | None = None,
+    caller_token_verifier: TokenVerifier | None = None,
 ) -> FastAPI:
     """Wire the handler; every collaborator is injectable for hermetic tests."""
     directory = None
@@ -226,6 +267,15 @@ def create_app(
 
     trigger_sweep = trigger_sweep or _build_sweep_trigger(settings)
     welcome_sender = welcome_sender or _build_welcome_sender()
+    broker = broker or _build_google_source_broker(settings)
+    if caller_token_verifier is None:
+
+        def caller_token_verifier(token: str) -> dict[str, Any]:
+            return verify_caller_token(
+                token,
+                audience=settings.pubsub_push_audience,
+                expected_sa=_agent_sa(settings),
+            )
 
     app = FastAPI()
 
@@ -241,9 +291,64 @@ def create_app(
             return False
         return True
 
+    def authorize_broker(request: Request) -> bool:
+        authorization = request.headers.get("authorization", "")
+        scheme, _, token = authorization.partition(" ")
+        if scheme.lower() != "bearer" or not token:
+            return False
+        try:
+            caller_token_verifier(token)
+        except PushAuthError as error:
+            logger.warning("rejected context broker caller", extra={"reason": str(error)})
+            return False
+        return True
+
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
+
+    @app.post("/context/search")
+    async def context_search(request: Request) -> Response:
+        if not authorize_broker(request):
+            return Response(status_code=403)
+        try:
+            payload = ContextSearchRequest.model_validate(await request.json())
+        except (ValidationError, ValueError, TypeError):
+            return Response(status_code=400)
+
+        subject = payload.principal_email.strip().casefold()
+        if subject not in ledger.onboarded_by_email():
+            logger.info(
+                "broker refused non-onboarded subject",
+                extra={"subject": subject, "source": payload.source},
+            )
+            return JSONResponse({"matches": []})
+
+        limit = max(1, min(payload.limit, MAX_LIMIT))
+        query = payload.query[:MAX_QUERY_CHARS]
+        if payload.source not in {"google_docs", "google_tasks"}:
+            return Response(status_code=400)
+        try:
+            matches = broker.search(payload.source, query, subject, limit)
+        except Exception as error:  # noqa: BLE001 - isolate broker/API failures from the pipeline
+            # Google API errors can include the request URL (and therefore the
+            # search text) in their message. Record only the exception type.
+            logger.warning(
+                "context broker search failed",
+                extra={
+                    "subject": subject,
+                    "source": payload.source,
+                    "result_count": 0,
+                    "error_type": type(error).__name__,
+                },
+            )
+            return Response(status_code=502)
+
+        logger.info(
+            "context broker search completed",
+            extra={"subject": subject, "source": payload.source, "result_count": len(matches)},
+        )
+        return JSONResponse({"matches": [match.model_dump(mode="json") for match in matches]})
 
     @app.post("/pubsub-push")
     async def pubsub_push(request: Request) -> Response:

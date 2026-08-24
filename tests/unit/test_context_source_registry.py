@@ -41,6 +41,28 @@ def test_unknown_source_fails_at_build_time() -> None:
         build_sources({"sources": [{"name": "missing"}]})
 
 
+def test_config_builds_all_google_sources_in_declared_order() -> None:
+    sources = build_sources(
+        {
+            "sources": [
+                {"name": "prior_meetings"},
+                {"name": "google_docs"},
+                {"name": "google_tasks"},
+            ]
+        },
+        source_kwargs={
+            "prior_meetings": {"client": FakeFirestoreClient([])},
+            "google_docs": {"base_url": "", "audience": ""},
+            "google_tasks": {"base_url": "", "audience": ""},
+        },
+    )
+    assert [source.name for source in sources] == [
+        "prior_meetings",
+        "google_docs",
+        "google_tasks",
+    ]
+
+
 def test_failing_source_is_skipped() -> None:
     class FailingSource(ContextSource):
         name = "failing"

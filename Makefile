@@ -40,6 +40,9 @@ backfill-embeddings:
 IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
 PROJECT_ID ?= $(shell cd infra && $(TF) output -raw project_id 2>/dev/null)
 REGION ?= us-central1
+CONTEXT_BROKER_URL ?= $(shell cd infra && $(TF) output -raw ingestion_url 2>/dev/null)
+CONTEXT_BROKER_AUDIENCE ?= $(shell cd infra && $(TF) output -raw pubsub_push_audience 2>/dev/null)
+BOOTSTRAP_WITHOUT_CONTEXT_BROKER ?= 0
 
 build-image:
 	gcloud builds submit --project=$(PROJECT_ID) \
@@ -56,8 +59,15 @@ build-subscription-image:
 	  --service-account=projects/$(PROJECT_ID)/serviceAccounts/weave-build-sa@$(PROJECT_ID).iam.gserviceaccount.com .
 
 deploy-agent:
+	@if [ -z "$(CONTEXT_BROKER_URL)" ] && [ "$(BOOTSTRAP_WITHOUT_CONTEXT_BROKER)" != "1" ]; then \
+	  echo "CONTEXT_BROKER_URL is required; use BOOTSTRAP_WITHOUT_CONTEXT_BROKER=1 only for the initial pass-1 agent"; \
+	  exit 1; \
+	fi
+	@test -n "$(CONTEXT_BROKER_AUDIENCE)" || (echo "CONTEXT_BROKER_AUDIENCE is required" && exit 1)
 	rm -rf dist && uv build --all-packages
-	uv run python agent/deployment/deploy.py
+	CONTEXT_BROKER_URL="$(CONTEXT_BROKER_URL)" \
+	  CONTEXT_BROKER_AUDIENCE="$(CONTEXT_BROKER_AUDIENCE)" \
+	  uv run python agent/deployment/deploy.py
 
 infra-init:
 	cd infra && $(TF) init

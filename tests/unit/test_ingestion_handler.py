@@ -12,8 +12,10 @@ from weave_common import (
     ActionType,
     Attendee,
     CommitmentStatus,
+    ContextMatch,
     EnrichedActionItem,
     EnrichedOwnerBundle,
+    MatchType,
     PipelineRequest,
     PipelineResult,
     TranscriptTurn,
@@ -166,6 +168,24 @@ class FakeScreen:
         return self.blocked
 
 
+class FakeBroker:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, str, int]] = []
+
+    def search(self, source: str, query: str, subject: str, limit: int) -> list[ContextMatch]:
+        self.calls.append((source, query, subject, limit))
+        if source not in {"google_docs", "google_tasks"}:
+            raise ValueError("unsupported")
+        return [
+            ContextMatch(
+                source_name=source,
+                match_type=MatchType.RELATED_DOCUMENT,
+                title="Launch plan",
+                snippet="document last modified 2026-08-20",
+            )
+        ]
+
+
 class RecordingDeliverer(Deliverer):
     def __init__(self, failures: set[str] | None = None) -> None:
         self.delivered: list[str] = []
@@ -225,6 +245,8 @@ def build(
     trigger_sweep: Any = None,
     welcome_sender: Any = None,
     resolve_subject_email: Any = None,
+    broker: Any = None,
+    caller_token_verifier: Any = None,
 ) -> tuple[TestClient, FakeSource, FakeLedger, RecordingDeliverer, FakeScreen]:
     source = FakeSource()
     ledger = ledger or FakeLedger()
@@ -241,12 +263,108 @@ def build(
         trigger_sweep=trigger_sweep or (lambda: None),
         welcome_sender=welcome_sender or (lambda user: None),
         resolve_subject_email=resolve_subject_email,
+        broker=broker,
+        caller_token_verifier=caller_token_verifier or (lambda token: {}),
     )
     client = TestClient(app, raise_server_exceptions=False)
     return client, source, ledger, deliverer, screen
 
 
 AUTH = {"Authorization": "Bearer token"}
+
+
+def test_context_broker_requires_its_own_bearer_verification() -> None:
+    broker = FakeBroker()
+    client, *_ = build(broker=broker)
+    body = {
+        "source": "google_docs",
+        "query": "launch plan",
+        "principal_email": "ana@example.com",
+        "limit": 5,
+    }
+
+    assert client.post("/context/search", json=body).status_code == 403
+
+    def reject(token: str) -> dict[str, Any]:
+        raise PushAuthError("wrong caller")
+
+    rejected, *_ = build(broker=broker, caller_token_verifier=reject)
+    assert rejected.post("/context/search", json=body, headers=AUTH).status_code == 403
+    assert broker.calls == []
+
+
+def test_context_broker_refuses_non_onboarded_subject_without_searching() -> None:
+    broker = FakeBroker()
+    client, *_ = build(broker=broker)
+    response = client.post(
+        "/context/search",
+        json={
+            "source": "google_tasks",
+            "query": "launch task",
+            "principal_email": "outsider@example.com",
+            "limit": 5,
+        },
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"matches": []}
+    assert broker.calls == []
+
+
+def test_context_broker_normalizes_subject_clamps_limit_and_serializes() -> None:
+    broker = FakeBroker()
+    client, *_ = build(broker=broker)
+    response = client.post(
+        "/context/search",
+        json={
+            "source": "google_docs",
+            "query": "launch plan",
+            "principal_email": " ANA@EXAMPLE.COM ",
+            "limit": 999,
+        },
+        headers=AUTH,
+    )
+
+    assert response.status_code == 200
+    assert broker.calls == [("google_docs", "launch plan", "ana@example.com", 20)]
+    assert response.json()["matches"][0]["match_type"] == "related_document"
+
+
+def test_context_broker_rejects_unknown_source() -> None:
+    broker = FakeBroker()
+    client, *_ = build(broker=broker)
+    response = client.post(
+        "/context/search",
+        json={
+            "source": "buganizer",
+            "query": "issue",
+            "principal_email": "ana@example.com",
+            "limit": 5,
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 400
+    assert broker.calls == []
+
+
+def test_context_broker_api_failure_is_contained() -> None:
+    class FailingBroker(FakeBroker):
+        def search(self, source: str, query: str, subject: str, limit: int) -> list[ContextMatch]:
+            raise RuntimeError("query text must not be logged")
+
+    client, *_ = build(broker=FailingBroker())
+    response = client.post(
+        "/context/search",
+        json={
+            "source": "google_docs",
+            "query": "sensitive meeting text",
+            "principal_email": "ana@example.com",
+            "limit": 5,
+        },
+        headers=AUTH,
+    )
+    assert response.status_code == 502
 
 
 def test_happy_path_delivers_writes_and_acks() -> None:

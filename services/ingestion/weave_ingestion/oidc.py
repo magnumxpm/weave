@@ -30,3 +30,22 @@ def verify_push_token(token: str, *, audience: str, expected_sa: str) -> dict[st
     if claims.get("email") != expected_sa:
         raise PushAuthError(f"unexpected service account: {claims.get('email')}")
     return claims
+
+
+def verify_caller_token(token: str, *, audience: str, expected_sa: str) -> dict[str, Any]:
+    """Verify the Agent Engine caller independently of the push identity path."""
+    import google.auth.transport.requests
+    from google.oauth2 import id_token
+
+    try:
+        claims = id_token.verify_oauth2_token(
+            token, google.auth.transport.requests.Request(), audience=audience
+        )
+    except Exception as error:
+        raise PushAuthError(f"signature/audience check failed: {error}") from error
+
+    if not claims.get("email_verified"):
+        raise PushAuthError("email not verified")
+    if claims.get("email") != expected_sa:
+        raise PushAuthError(f"unexpected service account: {claims.get('email')}")
+    return claims

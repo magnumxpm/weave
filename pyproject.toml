@@ -10,6 +10,7 @@ dependencies = [
     "google-cloud-modelarmor>=0.2.0",
     "google-genai>=2.19.0",
     "pyyaml>=6.0.2",
+    "requests>=2.32.0",
     "weave-common",
 ]
 
