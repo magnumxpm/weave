@@ -164,7 +164,10 @@ def create_app(
             rows[-1]["commitment_id"] = commitment_id
         if not rows:
             return None
-        return build_commitment_card(build_views(rows, today=datetime.now(UTC).date()))
+        return build_commitment_card(
+            build_views(rows, today=datetime.now(UTC).date()),
+            button_url=settings.chat_audience,
+        )
 
     def _handle_click(event: ChatClickEvent, addon: bool) -> dict[str, Any]:
         owner_email = onboarded.email_for(event.user_id)

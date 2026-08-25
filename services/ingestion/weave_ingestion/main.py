@@ -140,11 +140,15 @@ def _build_chat_client():
     return build("chat", "v1", credentials=credentials)
 
 
-def _build_chat_deliverer(directory) -> Deliverer:
+def _build_chat_deliverer(directory, button_url: str) -> Deliverer:
     client = _build_chat_client()
     # App-authenticated Chat calls cannot use an email alias, so resolve the
     # owner's numeric id through the directory.
-    return ChatDeliverer(client, lambda email: f"users/{directory.user_id_for_email(email)}")
+    return ChatDeliverer(
+        client,
+        lambda email: f"users/{directory.user_id_for_email(email)}",
+        button_url=button_url,
+    )
 
 
 def _build_sweep_trigger(settings: Settings) -> TriggerSweep:
@@ -222,7 +226,7 @@ def _build_chat_message_sender() -> ChatMessageSender:
     return send
 
 
-def _copilot_body(answer: Any) -> dict[str, Any]:
+def _copilot_body(answer: Any, button_url: str = "") -> dict[str, Any]:
     """Draw a commitment listing as a card; leave ordinary answers as text.
 
     The prose rides along above the card rather than being replaced by it, so a
@@ -246,7 +250,9 @@ def _copilot_body(answer: Any) -> dict[str, Any]:
     title = "What to do next" if advise else "Your commitments"
     return {
         "text": to_chat_text(lead_line(views, advise=advise)),
-        "cardsV2": [build_commitment_card(views, title=title, advise=advise)],
+        "cardsV2": [
+            build_commitment_card(views, title=title, advise=advise, button_url=button_url)
+        ],
     }
 
 
@@ -316,7 +322,9 @@ def create_app(
         ledger = MeetingLedger()
     if deliverer is None:
         deliverer = (
-            LogDeliverer() if settings.delivery_mode == "log" else _build_chat_deliverer(directory)
+            LogDeliverer()
+            if settings.delivery_mode == "log"
+            else _build_chat_deliverer(directory, settings.chat_button_url)
         )
     if screen is None:
         screen = TranscriptScreen(settings.model_armor_input_template, settings.region)
@@ -654,7 +662,9 @@ def create_app(
                         if isawaitable(reply):
                             reply = await reply
                         chat_message_sender(
-                            event.space_name, _copilot_body(reply), event.message_name
+                            event.space_name,
+                            _copilot_body(reply, settings.chat_button_url),
+                            event.message_name,
                         )
                     except Exception:  # noqa: BLE001 - never redeliver a conversational turn
                         logger.exception(

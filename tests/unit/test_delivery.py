@@ -172,15 +172,34 @@ def test_buttons_have_accessible_labels_and_stable_action_parameters() -> None:
     item_section = build_card(bundle())["card"]["sections"][0]
     buttons = item_section["widgets"][-1]["buttonList"]["buttons"]
     assert [button["altText"] for button in buttons] == ["Accept", "Mark done", "Decline"]
+    # Without an endpoint URL the logical name doubles as the function; either
+    # way the authoritative action is the weave_action parameter.
     assert [button["onClick"]["action"]["function"] for button in buttons] == [
         "accept_item",
         "mark_done",
         "decline_item",
     ]
     assert buttons[0]["onClick"]["action"]["parameters"] == [
+        {"key": "weave_action", "value": "accept_item"},
         {"key": "conference_id", "value": "abc"},
         {"key": "item_index", "value": "1"},
     ]
+
+
+def test_button_function_becomes_the_endpoint_url_for_http_addon_apps() -> None:
+    """An HTTP add-on routes the click to onClick.action.function itself; a bare
+    name gives the Chat client nowhere to send it and no server ever hears it."""
+    card = build_card(bundle(), button_url="https://weave-chat.example.run.app")
+    buttons = card["card"]["sections"][0]["widgets"][-1]["buttonList"]["buttons"]
+    assert {button["onClick"]["action"]["function"] for button in buttons} == {
+        "https://weave-chat.example.run.app"
+    }
+    assert [
+        parameter["value"]
+        for button in buttons
+        for parameter in button["onClick"]["action"]["parameters"]
+        if parameter["key"] == "weave_action"
+    ] == ["accept_item", "mark_done", "decline_item"]
 
 
 def test_header_renders_without_meeting_metadata() -> None:

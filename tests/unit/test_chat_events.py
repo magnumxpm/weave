@@ -155,3 +155,29 @@ def test_addon_card_click_reads_common_event_parameters() -> None:
         item_index="1",
         user_id="123",
     )
+
+
+def test_click_action_comes_from_weave_action_when_function_is_a_url() -> None:
+    """HTTP add-on buttons put the endpoint URL in function; the action rides in
+    parameters. A click parsed by its URL would dispatch to nothing."""
+    from weave_ingestion.chat_events import ChatClickEvent, parse_chat_event
+
+    payload = {
+        "commonEventObject": {
+            "invokedFunction": "https://weave-chat.example.run.app",
+            "parameters": {
+                "weave_action": "close_commitment",
+                "commitment_id": "c-1",
+                "rendered_ids": "c-1,c-2",
+            },
+        },
+        "chat": {
+            "user": {"name": "users/1234567890", "type": "HUMAN"},
+            "buttonClickedPayload": {},
+        },
+    }
+    event = parse_chat_event(payload)
+    assert isinstance(event, ChatClickEvent)
+    assert event.function == "close_commitment"
+    assert event.commitment_id == "c-1"
+    assert event.rendered_ids == "c-1,c-2"

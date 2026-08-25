@@ -16,9 +16,11 @@ class ChatDeliverer(Deliverer):
         self,
         client: Any,
         user_resource_resolver: Callable[[str], str],
+        button_url: str = "",
     ) -> None:
         self._client = client
         self._user_resource_resolver = user_resource_resolver
+        self._button_url = button_url
 
     def deliver(
         self,
@@ -44,7 +46,10 @@ class ChatDeliverer(Deliverer):
         response = (
             self._client.spaces()
             .messages()
-            .create(parent=space_name, body={"cardsV2": [build_card(bundle, meeting)]})
+            .create(
+                parent=space_name,
+                body={"cardsV2": [build_card(bundle, meeting, button_url=self._button_url)]},
+            )
             .execute()
         )
         return str(response["name"])

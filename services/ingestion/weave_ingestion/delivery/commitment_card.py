@@ -24,10 +24,15 @@ def _decorated(text: str, *, top_label: str, icon: str | None = None) -> dict[st
     return {"decoratedText": value}
 
 
-def _action(function: str, commitment_id: str, rendered_ids: str) -> dict[str, Any]:
+def _action(
+    function: str, commitment_id: str, rendered_ids: str, button_url: str
+) -> dict[str, Any]:
+    # HTTP-deployed add-on apps route the click to onClick.action.function, so
+    # it must be the endpoint URL there; the logical action is weave_action.
     return {
-        "function": function,
+        "function": button_url or function,
         "parameters": [
+            {"key": "weave_action", "value": function},
             {"key": "commitment_id", "value": commitment_id},
             {"key": "rendered_ids", "value": rendered_ids},
         ],
@@ -35,7 +40,7 @@ def _action(function: str, commitment_id: str, rendered_ids: str) -> dict[str, A
 
 
 def _item_widgets(
-    view: CommitmentView, rendered_ids: str, *, advise: bool = False
+    view: CommitmentView, rendered_ids: str, *, advise: bool = False, button_url: str = ""
 ) -> list[dict[str, Any]]:
     """One commitment: the headline, then only the facts it actually has."""
     widgets: list[dict[str, Any]] = [_decorated(view.title, top_label=view.reason, icon=view.icon)]
@@ -67,6 +72,7 @@ def _item_widgets(
                                 "reopen_commitment" if closed else "close_commitment",
                                 view.commitment_id,
                                 rendered_ids,
+                                button_url,
                             )
                         },
                     }
@@ -78,7 +84,11 @@ def _item_widgets(
 
 
 def build_commitment_card(
-    views: list[CommitmentView], *, title: str = "Your commitments", advise: bool = False
+    views: list[CommitmentView],
+    *,
+    title: str = "Your commitments",
+    advise: bool = False,
+    button_url: str = "",
 ) -> dict[str, Any]:
     """Render grouped commitments; the most urgent group is the one left open.
 
@@ -93,7 +103,7 @@ def build_commitment_card(
     for position, bucket in enumerate(group_views(shown)):
         widgets: list[dict[str, Any]] = []
         for view in bucket.views:
-            widgets.extend(_item_widgets(view, rendered_ids, advise=advise))
+            widgets.extend(_item_widgets(view, rendered_ids, advise=advise, button_url=button_url))
         section: dict[str, Any] = {"header": bucket.label, "widgets": widgets}
         if position:
             # Everything below the leading group folds away, so a long list stays
@@ -127,9 +137,12 @@ def build_card_from_rows(
     today: Any,
     title: str = "Your commitments",
     advise: bool = False,
+    button_url: str = "",
 ) -> dict[str, Any]:
     """Convenience for callers holding raw tool rows rather than views."""
-    return build_commitment_card(build_views(rows, today=today), title=title, advise=advise)
+    return build_commitment_card(
+        build_views(rows, today=today), title=title, advise=advise, button_url=button_url
+    )
 
 
 def lead_line(views: list[CommitmentView], *, advise: bool) -> str:

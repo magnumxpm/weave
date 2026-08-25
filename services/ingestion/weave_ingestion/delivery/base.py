@@ -67,15 +67,26 @@ def _status(status: CommitmentStatus) -> tuple[str, str]:
 
 
 def _action_button(
-    *, icon: str, alt_text: str, function: str, conference_id: str, item_index: int
+    *,
+    icon: str,
+    alt_text: str,
+    function: str,
+    conference_id: str,
+    item_index: int,
+    endpoint_url: str = "",
 ) -> dict[str, Any]:
+    # An HTTP-deployed add-on routes a click to onClick.action.function itself,
+    # so for those apps it must be the endpoint URL -- a bare name gives the
+    # client nowhere to send the click and it dies before reaching any server.
+    # The logical action always rides in parameters as weave_action.
     return {
         "icon": {"materialIcon": {"name": icon}},
         "altText": alt_text,
         "onClick": {
             "action": {
-                "function": function,
+                "function": endpoint_url or function,
                 "parameters": [
+                    {"key": "weave_action", "value": function},
                     {"key": "conference_id", "value": conference_id},
                     {"key": "item_index", "value": str(item_index)},
                 ],
@@ -87,6 +98,8 @@ def _action_button(
 def build_card(
     bundle: EnrichedOwnerBundle,
     meeting: MeetingHeader | None = None,
+    *,
+    button_url: str = "",
 ) -> dict[str, Any]:
     """Render one owner-scoped bundle without exposing retrieved context."""
     header: dict[str, Any] = {"title": "Action items for you"}
@@ -146,6 +159,7 @@ def build_card(
                             function="accept_item",
                             conference_id=conference_id,
                             item_index=item_index,
+                            endpoint_url=button_url,
                         ),
                         _action_button(
                             icon="done_all",
@@ -153,6 +167,7 @@ def build_card(
                             function="mark_done",
                             conference_id=conference_id,
                             item_index=item_index,
+                            endpoint_url=button_url,
                         ),
                         _action_button(
                             icon="close",
@@ -160,6 +175,7 @@ def build_card(
                             function="decline_item",
                             conference_id=conference_id,
                             item_index=item_index,
+                            endpoint_url=button_url,
                         ),
                     ]
                 }

@@ -97,7 +97,14 @@ def _parameters(value: Any) -> dict[str, str]:
 
 def _parse_click(payload: dict[str, Any]) -> ChatClickEvent | None:
     chat = payload.get("chat") if isinstance(payload.get("chat"), dict) else None
-    is_addon_click = chat is not None and isinstance(chat.get("buttonClickedPayload"), dict)
+    common = payload.get("commonEventObject")
+    common = common if isinstance(common, dict) else {}
+    # buttonClickedPayload is the documented signal, but the HTTP envelope has
+    # never been observed carrying a click yet; invokedFunction only appears on
+    # interactions, so either marks the payload as one.
+    is_addon_click = chat is not None and (
+        isinstance(chat.get("buttonClickedPayload"), dict) or bool(common.get("invokedFunction"))
+    )
     is_classic_click = (payload.get("type") or payload.get("eventType")) == "CARD_CLICKED"
     if not is_addon_click and not is_classic_click:
         return None
@@ -113,8 +120,6 @@ def _parse_click(payload: dict[str, Any]) -> ChatClickEvent | None:
         return None
 
     if chat is not None:
-        common = payload.get("commonEventObject")
-        common = common if isinstance(common, dict) else {}
         button = chat.get("buttonClickedPayload") or {}
         action = button.get("action") if isinstance(button, dict) else {}
         action = action if isinstance(action, dict) else {}
@@ -126,10 +131,14 @@ def _parse_click(payload: dict[str, Any]) -> ChatClickEvent | None:
         function = action.get("actionMethodName") or action.get("function")
         parameters = _parameters(action.get("parameters"))
 
-    if not isinstance(function, str) or not function:
+    # HTTP-deployed add-on apps require onClick.action.function to be the
+    # endpoint URL, so the logical action rides in parameters. The old field is
+    # the fallback for classic apps and for cards minted before this change.
+    action_name = parameters.get("weave_action") or function
+    if not isinstance(action_name, str) or not action_name:
         return None
     return ChatClickEvent(
-        function=function,
+        function=action_name,
         conference_id=parameters.get("conference_id"),
         item_index=parameters.get("item_index"),
         user_id=user_id,

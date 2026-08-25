@@ -46,6 +46,10 @@ resource "google_cloud_run_v2_service" "ingestion" {
         value = var.copilot_engine_id
       }
       env {
+        name  = "CHAT_BUTTON_URL"
+        value = var.chat_audience
+      }
+      env {
         name  = "PUBSUB_PUSH_SA"
         value = google_service_account.pubsub_push.email
       }
