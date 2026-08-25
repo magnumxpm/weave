@@ -83,11 +83,30 @@ Propagation takes minutes; `403 unauthorized_client` afterwards means wait.
 **Configuration** tab):
 - App name `Weave`, any HTTPS avatar URL, short description.
 - Interactive features: **on**; allow direct messages.
-- Connection settings: **Cloud Pub/Sub topic**, using the
-  `chat_events_topic` Terraform output.
+- Connection settings: **App URL**, using the `chat_service_url` Terraform
+  output, and **Authentication Audience: HTTP endpoint URL**.
 - Visibility: make the internal app discoverable throughout the Workspace
   domain (or a test group during rollout).
 - Save; app status should read LIVE.
+
+**Why not Cloud Pub/Sub here.** Pub/Sub was the original connection and still
+works for messages, but a Pub/Sub-connected app has no channel to answer an
+interaction on: Google's own documentation says such an app "can't update
+individual cards with a synchronous response" and "can't use dialogs". In
+practice a card button click never reached the service at all and Chat showed
+the user a red *"Weave is unable to process your request"*. Card buttons
+therefore require the App URL connection.
+
+`weave-chat` answers clicks itself and republishes everything else to the same
+`chat_events_topic`, so ingestion's onboarding and copilot paths are unchanged.
+That also makes the switch reversible: setting Connection settings back to the
+Pub/Sub topic restores the previous behaviour with no redeploy.
+
+Authentication Audience must be **HTTP endpoint URL** rather than Project
+Number. Both are supported by Chat, but the URL option makes the bearer a
+Google-signed OIDC token that `verify_chat_token` checks with the same call the
+rest of the codebase already uses for Pub/Sub push. If the audience is wrong the
+service answers 401 and the failure is immediate and visible, not silent.
 
 Leave **Join spaces and group conversations** off: Weave delivers to direct
 messages only. That checkbox is what `ADDED_TO_SPACE` depends on, so with it
@@ -98,6 +117,15 @@ shown under Connection settings is one of the two publishers granted in
 `service-<project-number>@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`, not as
 `chat-api-push`. Getting this wrong is silent: Chat publishes nothing and the
 topic simply stays empty.
+
+The **Service account email** under Connection settings also tells you which
+envelope dialect this app produces. An add-on-style app
+(`service-<project-number>@gcp-sa-gsuiteaddons...`) nests its payload under
+`chat` and takes a different response shape than a classic app
+(`chat-api-push@system...`). Both are handled: `parse_chat_event` accepts either
+envelope and `weave_chat.responses` picks the matching reply dialect from the
+request itself, logging `envelope_dialect` on every call. Read that log line
+after the first click rather than assuming which shape arrived.
 
 **6b. User onboarding.** Availability and installation are intentionally
 different. Each user chooses Chat → New chat → Weave and **sends it any
