@@ -24,9 +24,10 @@ dev = [
 ]
 
 [tool.uv.workspace]
-members = ["shared", "services/ingestion", "services/subscription_manager"]
+members = ["shared", "services/chat", "services/ingestion", "services/subscription_manager"]
 
 [tool.uv.sources]
+weave-chat = { workspace = true }
 weave-common = { workspace = true }
 weave-ingestion = { workspace = true }
 weave-subscriptions = { workspace = true }

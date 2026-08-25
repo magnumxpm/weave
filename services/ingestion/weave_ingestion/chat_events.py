@@ -52,6 +52,10 @@ class ChatClickEvent(BaseModel):
     conference_id: str | None = None
     item_index: str | None = None
     user_id: str
+    # Commitment cards address an item directly; meeting cards predate
+    # commitments and still address one by conference plus position.
+    commitment_id: str | None = None
+    rendered_ids: str | None = None
 
 
 def _is_direct_message(space: dict[str, Any]) -> bool:
@@ -129,6 +133,8 @@ def _parse_click(payload: dict[str, Any]) -> ChatClickEvent | None:
         conference_id=parameters.get("conference_id"),
         item_index=parameters.get("item_index"),
         user_id=user_id,
+        commitment_id=parameters.get("commitment_id"),
+        rendered_ids=parameters.get("rendered_ids"),
     )
 
 

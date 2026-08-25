@@ -1,0 +1,24 @@
+[project]
+name = "weave-chat"
+version = "0.1.0"
+description = "Public Google Chat interaction endpoint; holds no delegation"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.115.0",
+    "google-auth>=2.38.0",
+    "google-cloud-firestore>=2.21.0",
+    "google-cloud-pubsub>=2.23.0",
+    "uvicorn>=0.34.0",
+    "weave-ingestion",
+]
+
+[tool.uv.sources]
+weave-ingestion = { workspace = true }
+
+[tool.uv.build-backend]
+module-name = "weave_chat"
+module-root = ""
+
+[build-system]
+requires = ["uv_build>=0.12.3,<0.13.0"]
+build-backend = "uv_build"
