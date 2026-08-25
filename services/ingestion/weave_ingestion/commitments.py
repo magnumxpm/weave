@@ -209,6 +209,15 @@ class CommitmentStore:
                         _as_date(existing.get("last_mentioned")) or mention.meeting_date,
                         mention.meeting_date,
                     ).isoformat(),
+                    # Mentions do not arrive in meeting order. A backfill walks
+                    # write order, so an older mention can merge into a
+                    # commitment created from a newer one; without this the span
+                    # last_mentioned - first_seen understates the carry-over age
+                    # that is the whole point of tracking the commitment.
+                    "first_seen": min(
+                        _as_date(existing.get("first_seen")) or mention.meeting_date,
+                        mention.meeting_date,
+                    ).isoformat(),
                     "mention_count": int(existing.get("mention_count") or 0) + 1,
                     "deadline": latest_deadline.isoformat() if latest_deadline else None,
                     "updated_at": now,

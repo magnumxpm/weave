@@ -108,6 +108,16 @@ def test_apply_create_merge_idempotency_and_deadline_max() -> None:
     assert client.data[path]["mention_count"] == 2
     assert client.data[path]["deadline"] == "2026-09-01"
     assert client.data[path]["title"] == "Canonical launch brief"
+    assert client.data[path]["last_mentioned"] == "2026-08-24"
+    assert client.data[path]["first_seen"] == "2026-08-20"
+
+    # A backfill walks write order, so a mention older than the one that created
+    # the commitment can arrive last. The carry-over span is measured from
+    # first_seen, so it has to move earlier rather than stay put.
+    earliest = mention("meeting-0--owner@example.com--0", 3)
+    store.apply(decision(commitment_id), earliest, "owner@example.com", None)
+    assert client.data[path]["first_seen"] == "2026-08-03"
+    assert client.data[path]["last_mentioned"] == "2026-08-24"
 
 
 def test_close_and_reopen_are_owner_guarded_and_idempotent() -> None:
