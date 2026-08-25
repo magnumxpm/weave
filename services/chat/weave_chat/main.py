@@ -28,6 +28,7 @@ from weave_ingestion.chat_events import ChatClickEvent, parse_chat_event
 from weave_ingestion.commitments import CommitmentStore
 from weave_ingestion.delivery.commitment_card import build_commitment_card
 from weave_ingestion.firestore_client import ONBOARDED
+from weave_ingestion.logging_config import configure_logging
 from weave_ingestion.oidc import PushAuthError
 
 from weave_chat.config import ChatSettings, settings_from_env
@@ -231,6 +232,8 @@ def create_app(
 
 def __getattr__(name: str) -> Any:
     if name == "app":  # uvicorn entrypoint; env validation happens right here
-        logging.basicConfig(level=logging.INFO)
+        # Not basicConfig: it formats only the message, so every `extra` field --
+        # including the token claims a rejection depends on -- is dropped.
+        configure_logging()
         return create_app(settings_from_env())
     raise AttributeError(name)
