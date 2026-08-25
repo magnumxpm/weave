@@ -25,9 +25,14 @@ def _date(value: Any) -> date:
 
 
 def _vector(value: Any) -> list[float] | None:
-    raw = getattr(value, "to_map_value", lambda: None)()
-    if isinstance(raw, dict) and isinstance(raw.get("values"), list):
-        return [float(number) for number in raw["values"]]
+    """Read a stored embedding back as plain floats.
+
+    `Vector` is a Sequence, so iterating it is the whole job; an earlier version
+    reached into `to_map_value()` for a "values" key that does not exist (the
+    key is "value") and only worked by falling through to this. Losing the
+    vector here is invisible -- candidate retrieval just silently degrades to
+    the recency fallback -- so keep the one path that is exercised.
+    """
     try:
         values = list(value)
     except TypeError:

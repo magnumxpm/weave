@@ -279,8 +279,22 @@ Docs/Tasks reads only through `/context/search`.
    reconcile them into owner-scoped `commitments`; reconciliation failure is recorded on
    the processed meeting but never fails delivery.
 3. Run `make backfill-commitments PROJECT_ID=<PROJECT_ID>`. The command is replay-safe via
-   UUIDv5 commitment ids and mention subdocument ids. Spot-check merges before exposing the
-   copilot: same deliverable across meetings should merge; same topic alone must not.
+   UUIDv5 commitment ids and mention subdocument ids.
+
+   **"Commitments appeared" is not the check — total failure produces that too.** Three
+   independent degradations all end with one commitment per mention and a `completed`
+   status: the reconcile model call failing (caught, becomes an `ORIGINAL` decision), the
+   `commitments_vector` index not yet `READY` (caught, falls back to unranked recency), and
+   embeddings not surviving the read (silent, not even logged). Each turns the graph back
+   into the pile of independent tasks it exists to replace. Verify instead that:
+
+   - at least one commitment has `mention_count > 1`, and its mention subdocuments name
+     different meetings;
+   - the ingestion logs contain no `commitment judgment failed` and no
+     `commitment vector lookup failed` entries.
+
+   Then spot-check merge quality: the same deliverable across meetings should merge; the
+   same topic alone must not.
 4. Deploy the ADK app:
 
    ```bash
@@ -299,9 +313,14 @@ Docs/Tasks reads only through `/context/search`.
 
 ### Gemini Enterprise registration
 
-Google's current Agent Runtime registration documentation states that ADK agents receive
-the invoking user's email. Weave still fails closed unless the runtime supplies that value
-as an email-shaped ADK `user_id`; it never asks the model or user to identify the caller.
+**Unverified as of the first copilot rollout.** Chat is the only surface exercised
+end-to-end; there, the principal is the directory-resolved email of the Chat sender. The
+registration documentation states that ADK agents receive the invoking user's email, but
+which field carries it has not been observed on a live invocation. Weave fails closed
+unless it arrives as an email-shaped ADK `user_id`: a non-email id leaves an empty
+principal in session state and every tool returns nothing, so an unmapped identity yields
+a useless agent, never a leaky one. It never asks the model or the user who is calling.
+
 Before domain rollout, register the engine in Gemini Enterprise → app → Agents → Add agent →
 Custom agent via Agent Runtime, using display name **Weave Commitment Copilot** and the full
 `COPILOT_ENGINE_ID` resource path. No optional per-user OAuth authorization is needed because
