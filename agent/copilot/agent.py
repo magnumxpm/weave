@@ -17,6 +17,7 @@ from agent.copilot.tools import (
     reopen_commitment,
     search_my_history,
     search_workspace_evidence,
+    suggest_next_actions,
     trace_blockers,
 )
 
@@ -32,6 +33,7 @@ def build_copilot() -> LlmAgent:
         model=os.environ.get("WEAVE_MODEL", "gemini-2.5-flash"),
         instruction=COPILOT_INSTRUCTION,
         tools=[
+            suggest_next_actions,
             list_my_commitments,
             get_commitment_history,
             find_stale_commitments,

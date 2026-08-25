@@ -7,6 +7,7 @@ from weave_ingestion.delivery.commitment_card import (
     MAX_CARD_ITEMS,
     build_card_from_rows,
     build_commitment_card,
+    lead_line,
     rendered_ids_of,
 )
 
@@ -153,3 +154,41 @@ def test_views_and_card_agree_on_what_is_shown() -> None:
     views = build_views(rows, today=TODAY)
     card = build_commitment_card(views)
     assert card["card"]["header"]["subtitle"] == "2 open commitments · 1 overdue"
+
+
+def test_advice_mode_shows_the_next_step_and_a_plain_list_does_not() -> None:
+    """Ten repetitions of advice would bury the list it is advising on."""
+    rows = [row("a", deadline="2026-08-01")]
+    advised = build_card_from_rows(rows, today=TODAY, advise=True)
+    listed = build_card_from_rows(rows, today=TODAY)
+
+    labels = lambda card: {label for s in sections(card) for label, _ in widget_texts(s)}  # noqa: E731
+    assert "Suggested next step" in labels(advised)
+    assert "Suggested next step" not in labels(listed)
+
+
+def test_the_lead_line_keeps_the_casing_of_names_it_quotes() -> None:
+    """Lowercasing the recommendation into the sentence mangled "OAuth" to "oauth"."""
+    views = build_views(
+        [
+            row("gate", title="OAuth security review"),
+            row("ship", title="Ship it", deadline="2026-08-01", blocked_by=["gate"]),
+        ],
+        today=TODAY,
+    )
+    assert "OAuth security review" in lead_line(views, advise=True)
+
+
+def test_the_lead_line_names_the_first_action_instead_of_restating_the_card() -> None:
+    """The model's prose repeated every card item; this replaces it on Chat only."""
+    views = build_views(
+        [row("a", title="Ship the launch", deadline="2026-08-01"), row("b")], today=TODAY
+    )
+    advice = lead_line(views, advise=True)
+    assert "Ship the launch" in advice
+    assert "Start with" in advice
+    # It must not enumerate the rest: that is what the card is for.
+    assert "Commitment b" not in advice
+
+    assert "Everything on your plate" in lead_line(views, advise=False)
+    assert lead_line([], advise=True).startswith("Nothing")

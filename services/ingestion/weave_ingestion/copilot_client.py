@@ -6,8 +6,13 @@ import hashlib
 from dataclasses import dataclass, field
 from typing import Any
 
-# Tools whose payload is a list of commitment rows worth drawing as a card.
-COMMITMENT_TOOLS = frozenset({"list_my_commitments", "find_stale_commitments"})
+# Tools whose payload is a list of commitment rows worth drawing as a card, and
+# whether that listing is advice ("what should I do") or an inventory.
+COMMITMENT_TOOLS = {
+    "suggest_next_actions": True,
+    "list_my_commitments": False,
+    "find_stale_commitments": False,
+}
 
 
 def _session_id(space_name: str) -> str:
@@ -29,12 +34,14 @@ class CopilotAnswer:
     text: str
     tool_results: tuple[ToolResult, ...] = field(default_factory=tuple)
 
-    def commitment_rows(self) -> list[dict[str, Any]]:
-        """Rows from the last commitment listing this turn, if any.
+    def commitment_listing(self) -> tuple[list[dict[str, Any]], bool] | None:
+        """The last commitment listing this turn, and whether it is advice.
 
         The listing is what the answer is *about*, so a later tool call (closing
         an item, say) must not change which rows get drawn -- only the most
         recent listing counts, and anything that is not a row list is ignored.
+        Returns None when the turn produced no listing at all, which is how an
+        ordinary question stays ordinary text.
         """
         for result in reversed(self.tool_results):
             if result.name not in COMMITMENT_TOOLS:
@@ -43,8 +50,13 @@ class CopilotAnswer:
             if isinstance(payload, list) and all(
                 isinstance(row, dict) and row.get("commitment_id") for row in payload
             ):
-                return list(payload) if payload else []
-        return []
+                return list(payload), COMMITMENT_TOOLS[result.name]
+        return None
+
+    def commitment_rows(self) -> list[dict[str, Any]]:
+        """Just the rows, for callers that do not care how they were asked for."""
+        listing = self.commitment_listing()
+        return listing[0] if listing else []
 
 
 def _parts(event: Any) -> list[dict[str, Any]]:

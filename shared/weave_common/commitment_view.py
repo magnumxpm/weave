@@ -199,6 +199,37 @@ def _reason(row: dict[str, Any], group: UrgencyGroup, dependents: int, today: da
     return "Open, no deadline set"
 
 
+def _recommendation(
+    row: dict[str, Any], group: UrgencyGroup, dependents: int, blockers: tuple[str, ...]
+) -> str:
+    """The next move, not the diagnosis.
+
+    A reason says why an item surfaced; this says what to do about it. Order
+    matters: being blocked changes the advice even when the item is overdue,
+    because "finish it" is useless advice for work that cannot proceed.
+    """
+    if blockers and group is not UrgencyGroup.CLOSED:
+        first = blockers[0]
+        rest = f" (and {len(blockers) - 1} more)" if len(blockers) > 1 else ""
+        return f"Blocked — push on {first}{rest} before this can move"
+    if group is UrgencyGroup.LIKELY_COMPLETE:
+        return "Looks finished — confirm and close it"
+    if group is UrgencyGroup.CLOSED:
+        return "Nothing to do"
+    if dependents:
+        return f"Do this first — it frees up {_plural(dependents, 'other commitment')}"
+    if group is UrgencyGroup.OVERDUE:
+        return "Past due — finish it or renegotiate the date"
+    if group is UrgencyGroup.DUE_SOON:
+        return "Block out time for this today"
+    if group is UrgencyGroup.WAITING:
+        waiting_on = str(row.get("waiting_on") or "").strip()
+        return f"Chase {waiting_on}" if waiting_on else "Follow up with whoever owes you this"
+    if group is UrgencyGroup.STALE:
+        return "Nobody has mentioned this lately — is it still real?"
+    return "Pick this up when you have a free slot"
+
+
 def _carry_over(row: dict[str, Any], reason: str) -> str | None:
     """The span the commitment graph exists to make visible.
 
@@ -226,6 +257,7 @@ class CommitmentView(FrozenModel):
     urgency_label: str
     icon: str
     reason: str
+    recommendation: str = ""
     attention_score: int = 0
     deadline: date | None = None
     waiting_on: str | None = None
@@ -263,10 +295,20 @@ def decorate_rows(
     """
     universe = all_rows if all_rows is not None else rows
     dependents = transitive_dependents(universe)
+    titles = {str(row.get("commitment_id") or ""): str(row.get("title") or "") for row in universe}
+    open_ids = {
+        str(row.get("commitment_id") or "") for row in universe if row.get("status") != "closed"
+    }
     decorated: list[dict[str, Any]] = []
     for row in rows:
         item_id = str(row.get("commitment_id") or "")
         count = dependents.get(item_id, 0)
+        # Only unresolved blockers are advice; a finished one is history.
+        blockers = tuple(
+            titles[str(blocker)]
+            for blocker in row.get("blocked_by") or []
+            if titles.get(str(blocker)) and str(blocker) in open_ids
+        )
         group = _urgency(row, count, today)
         reason = _reason(row, group, count, today)
         decorated.append(
@@ -277,6 +319,8 @@ def decorate_rows(
                 "urgency": group.value,
                 "urgency_label": GROUP_LABELS[group],
                 "attention_reason": reason,
+                "recommendation": _recommendation(row, group, count, blockers),
+                "blocked_by_titles": list(blockers),
                 "carry_over_summary": _carry_over(row, reason),
             }
         )
@@ -303,16 +347,26 @@ def build_views(
         if rows and all("attention_reason" in row for row in rows)
         else decorate_rows(rows, all_rows=universe, today=today)
     )
-    titles = {str(row.get("commitment_id") or ""): str(row.get("title") or "") for row in universe}
+    # A blocker that is finished is history, not an obstacle, so it must not
+    # reach a card saying "Blocked by" -- the same rule decorate_rows applies
+    # when it writes the recommendation.
+    titles = {
+        str(row.get("commitment_id") or ""): str(row.get("title") or "")
+        for row in universe
+        if row.get("status") != "closed"
+    }
     views: list[CommitmentView] = []
     for row in decorated:
         group = UrgencyGroup(str(row.get("urgency") or UrgencyGroup.ACTIVE.value))
         # Unresolved blocker ids are dropped rather than shown as raw uuids: a
         # blocker we cannot name is one the reader cannot act on.
         blockers = tuple(
-            titles[str(blocker)]
-            for blocker in row.get("blocked_by") or []
-            if titles.get(str(blocker))
+            row.get("blocked_by_titles")
+            or [
+                titles[str(blocker)]
+                for blocker in row.get("blocked_by") or []
+                if titles.get(str(blocker))
+            ]
         )
         likely_complete = row.get("status") == "likely_complete"
         confidence = row.get("status_confidence")
@@ -325,6 +379,7 @@ def build_views(
                 urgency_label=str(row.get("urgency_label") or GROUP_LABELS[group]),
                 icon=GROUP_ICONS[group],
                 reason=str(row.get("attention_reason") or ""),
+                recommendation=str(row.get("recommendation") or ""),
                 attention_score=int(row.get("attention_score") or 0),
                 deadline=as_date(row.get("deadline")),
                 waiting_on=str(row["waiting_on"]) if row.get("waiting_on") else None,

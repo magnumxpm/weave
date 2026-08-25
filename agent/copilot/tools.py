@@ -63,6 +63,22 @@ def list_my_commitments(status_filter: str, tool_context: ToolContext) -> list[d
     return decorate_rows(rows, all_rows=all_rows, today=datetime.now(UTC).date())
 
 
+def suggest_next_actions(limit: int, tool_context: ToolContext) -> list[dict[str, Any]]:
+    """Suggest which of my commitments to act on next, and what to do about each.
+
+    Args:
+        limit: How many to suggest. Use 3 unless the user asks for more.
+    """
+    principal = _principal(tool_context)
+    if principal is None:
+        return []
+    rows = _store().list_commitments(principal)
+    # Closed work is not a suggestion; everything else competes on rank.
+    live = [row for row in rows if row.get("status") != "closed"]
+    ranked = decorate_rows(live, all_rows=rows, today=datetime.now(UTC).date())
+    return ranked[: max(1, min(limit or 3, 10))]
+
+
 def get_commitment_history(commitment_id: str, tool_context: ToolContext) -> dict[str, Any]:
     """Get my commitment and its chronological, immutable mention timeline."""
     principal = _principal(tool_context)

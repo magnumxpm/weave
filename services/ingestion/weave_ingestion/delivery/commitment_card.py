@@ -34,9 +34,13 @@ def _action(function: str, commitment_id: str, rendered_ids: str) -> dict[str, A
     }
 
 
-def _item_widgets(view: CommitmentView, rendered_ids: str) -> list[dict[str, Any]]:
+def _item_widgets(
+    view: CommitmentView, rendered_ids: str, *, advise: bool = False
+) -> list[dict[str, Any]]:
     """One commitment: the headline, then only the facts it actually has."""
     widgets: list[dict[str, Any]] = [_decorated(view.title, top_label=view.reason, icon=view.icon)]
+    if advise and view.recommendation:
+        widgets.append(_decorated(view.recommendation, top_label="Suggested next step"))
     facts = view.present_facts
     if "waiting_on" in facts:
         widgets.append(_decorated(str(view.waiting_on), top_label="Waiting on"))
@@ -74,9 +78,14 @@ def _item_widgets(view: CommitmentView, rendered_ids: str) -> list[dict[str, Any
 
 
 def build_commitment_card(
-    views: list[CommitmentView], *, title: str = "Your commitments"
+    views: list[CommitmentView], *, title: str = "Your commitments", advise: bool = False
 ) -> dict[str, Any]:
-    """Render grouped commitments; the most urgent group is the one left open."""
+    """Render grouped commitments; the most urgent group is the one left open.
+
+    `advise` turns a listing into a recommendation: each item also carries its
+    suggested next step. Kept off for a full list, where ten repetitions of
+    advice would bury the list it is advising on.
+    """
     shown = views[:MAX_CARD_ITEMS]
     rendered_ids = ",".join(view.commitment_id for view in shown)
     sections: list[dict[str, Any]] = []
@@ -84,7 +93,7 @@ def build_commitment_card(
     for position, bucket in enumerate(group_views(shown)):
         widgets: list[dict[str, Any]] = []
         for view in bucket.views:
-            widgets.extend(_item_widgets(view, rendered_ids))
+            widgets.extend(_item_widgets(view, rendered_ids, advise=advise))
         section: dict[str, Any] = {"header": bucket.label, "widgets": widgets}
         if position:
             # Everything below the leading group folds away, so a long list stays
@@ -113,10 +122,34 @@ def build_commitment_card(
 
 
 def build_card_from_rows(
-    rows: list[dict[str, Any]], *, today: Any, title: str = "Your commitments"
+    rows: list[dict[str, Any]],
+    *,
+    today: Any,
+    title: str = "Your commitments",
+    advise: bool = False,
 ) -> dict[str, Any]:
     """Convenience for callers holding raw tool rows rather than views."""
-    return build_commitment_card(build_views(rows, today=today), title=title)
+    return build_commitment_card(build_views(rows, today=today), title=title, advise=advise)
+
+
+def lead_line(views: list[CommitmentView], *, advise: bool) -> str:
+    """The one sentence that goes above a card.
+
+    The model's own prose is dropped on this surface: it restates every item the
+    card is about to draw, which reads as the same answer printed twice. Gemini
+    Enterprise still gets the full prose, because there it is the whole answer.
+    """
+    if not views:
+        return "Nothing needs your attention right now."
+    if advise:
+        top = views[0]
+        # Never case-fold the recommendation into the sentence: it carries
+        # product and person names ("OAuth", "Sarah") that lowercasing mangles.
+        opener = f"Start with *{top.title}*. {top.recommendation}."
+        if len(views) == 1:
+            return opener
+        return f"{opener} {len(views) - 1} more below, in the order I'd take them."
+    return f"Everything on your plate — {summarize(views)}."
 
 
 def rendered_ids_of(card: dict[str, Any]) -> tuple[str, ...]:

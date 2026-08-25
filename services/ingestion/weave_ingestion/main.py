@@ -229,16 +229,25 @@ def _copilot_body(answer: Any) -> dict[str, Any]:
     Chat reader and a Gemini Enterprise reader are told the same thing -- the
     card is a nicer rendering of that answer, not a different answer.
     """
+    from weave_common import build_views
+
     from weave_ingestion.copilot_client import CopilotAnswer
     from weave_ingestion.delivery.chat_text import to_chat_text
-    from weave_ingestion.delivery.commitment_card import build_card_from_rows
+    from weave_ingestion.delivery.commitment_card import build_commitment_card, lead_line
 
     if not isinstance(answer, CopilotAnswer):
         return {"text": to_chat_text(str(answer))}
-    body: dict[str, Any] = {"text": to_chat_text(answer.text)}
-    if rows := answer.commitment_rows():
-        body["cardsV2"] = [build_card_from_rows(rows, today=datetime.now(UTC).date())]
-    return body
+    listing = answer.commitment_listing()
+    if listing is None:
+        return {"text": to_chat_text(answer.text)}
+
+    rows, advise = listing
+    views = build_views(rows, today=datetime.now(UTC).date())
+    title = "What to do next" if advise else "Your commitments"
+    return {
+        "text": to_chat_text(lead_line(views, advise=advise)),
+        "cardsV2": [build_commitment_card(views, title=title, advise=advise)],
+    }
 
 
 def _build_reconciler(store: CommitmentStore) -> ReconcileRows:

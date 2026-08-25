@@ -187,3 +187,43 @@ def test_carry_over_is_dropped_when_it_only_restates_the_reason() -> None:
     )
     assert spanning.carry_over == "Raised in 2 meetings over 7 weeks"
     assert spanning.carry_over != spanning.reason
+
+
+def test_a_blocked_commitment_is_told_to_push_on_its_blocker_not_to_finish_itself() -> None:
+    """Advice has to account for dependencies: "finish it" is useless when it cannot move."""
+    rows = [
+        row("gate", title="Security review", status="waiting", waiting_on="the security team"),
+        row("ship", title="Ship the launch", deadline="2026-08-22", blocked_by=["gate"]),
+    ]
+    views = build_views(rows, today=TODAY)
+
+    ship = only(views, "ship")
+    assert ship.urgency is UrgencyGroup.OVERDUE
+    assert "Security review" in ship.recommendation
+    assert ship.blocked_by_titles == ("Security review",)
+
+    gate = only(views, "gate")
+    assert "frees up" in gate.recommendation
+
+
+def test_a_closed_blocker_no_longer_shapes_the_advice() -> None:
+    rows = [
+        row("gate", title="Security review", status="closed"),
+        row("ship", title="Ship the launch", blocked_by=["gate"]),
+    ]
+    ship = only(build_views(rows, today=TODAY), "ship")
+    assert ship.blocked_by_titles == ()
+    assert "Security review" not in ship.recommendation
+
+
+def test_every_state_gets_an_actionable_next_step() -> None:
+    rows = [
+        row("late", deadline="2026-08-01"),
+        row("soon", deadline="2026-08-26"),
+        row("held", status="waiting", waiting_on="Sarah"),
+        row("quiet", last_mentioned="2026-07-01"),
+        row("done", status="likely_complete", status_confidence=0.9),
+    ]
+    for view in build_views(rows, today=TODAY):
+        assert view.recommendation
+        assert view.recommendation != view.reason
