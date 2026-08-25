@@ -245,6 +245,7 @@ class MeetingLedger:
                 "owner_email": bundle.owner_email,
                 "status": item.status.value,
                 "deadline": item.deadline.isoformat() if item.deadline else None,
+                "blocked_on": item.blocked_on,
                 "title": enriched.title,
                 "details": enriched.details,
                 "meeting_date": bundle.meeting_date.isoformat(),

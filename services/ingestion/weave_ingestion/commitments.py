@@ -40,6 +40,8 @@ def judgement_text(enriched: Any) -> str:
     """
     item = enriched.item
     parts = [item.description]
+    if item.blocked_on:
+        parts.append(f"Stated precondition: {item.blocked_on}")
     for extra in (item.source_text, enriched.details):
         text = (extra or "").strip()
         # Skip near-duplicates: the enricher often echoes the description back.

@@ -216,3 +216,41 @@ def test_a_hint_naming_an_id_outside_the_candidates_is_not_trusted(monkeypatch: 
     reconcile_meeting(store, lambda text, candidates: hinting("c-invented"), [row()])
 
     assert store.applied[0]["blocked_by"] is None
+
+
+def test_a_stated_precondition_reaches_the_judgement_verbatim() -> None:
+    """The dependency people speak ("blocked because I need your email") is
+    paraphrased out of the description, so it has to travel as its own field."""
+    from weave_ingestion.commitments import judgement_text
+
+    item = ActionItem(
+        description="Pritam Mukherjee will request access from Jeremy.",
+        source_text="you need to request for your access to Jeremy",
+        blocked_on="blocked because I need Srija Dutta's email to attach",
+        action_type=ActionType.TASK,
+        status=CommitmentStatus.ACCEPTED,
+        owner_email="owner@example.com",
+        owner_confidence=1.0,
+        resolution_turn_ref=1,
+    )
+    text = judgement_text(EnrichedActionItem(item=item, title="Request access", details=None))
+
+    assert "Stated precondition:" in text
+    assert "Srija Dutta's email" in text
+    # The mention's own excerpt stays the clean description; this text is only
+    # ever for judgement.
+    assert text.splitlines()[0] == item.description
+
+
+def test_an_item_without_a_precondition_adds_no_precondition_line() -> None:
+    from weave_ingestion.commitments import judgement_text
+
+    item = ActionItem(
+        description="Send the report.",
+        action_type=ActionType.TASK,
+        status=CommitmentStatus.ACCEPTED,
+        owner_email="owner@example.com",
+        owner_confidence=1.0,
+        resolution_turn_ref=1,
+    )
+    assert "precondition" not in judgement_text(EnrichedActionItem(item=item, title="Send"))

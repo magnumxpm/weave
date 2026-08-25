@@ -127,6 +127,11 @@ class ActionItem(FrozenModel):
     resolution_turn_ref: int | None = Field(default=None, ge=0)
     deadline: date | None = None
     deadline_source_text: str | None = None
+    # What the transcript says must happen before this can start. Only ever a
+    # stated precondition, never inferred from two items sharing a topic -- a
+    # guessed dependency corrupts exactly the "what should I do first" answer
+    # the commitment graph exists to give.
+    blocked_on: str | None = None
 
     @model_validator(mode="after")
     def accepted_item_has_resolution(self) -> ActionItem:

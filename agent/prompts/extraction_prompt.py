@@ -37,6 +37,14 @@ the support request she raised yesterday for her device, which is not working." 
 the spoken action span, and references contains resolved entries for "me", "I", and "my" at turn
 4, all copied from resolve_speaker for Srija's participant ID.
 
+Set blocked_on when a turn explicitly states that this action cannot start until something
+else happens -- "I can't send the request until you give me your email", "once you get the
+access, then modify the file", "this is blocked on the security review". Quote the spoken
+precondition, naming the person or deliverable it waits on, and resolve any person-reference
+in it exactly as in description. Leave blocked_on null when no turn states a precondition:
+two items being related, sequential in the conversation, or about the same project is not a
+dependency.
+
 Do not add context, background research, or action items unsupported by transcript turns.
 Return the validated MeetingInsights structure for the supplied conference record and date.
 """.strip()

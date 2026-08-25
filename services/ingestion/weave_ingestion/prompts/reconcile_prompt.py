@@ -8,6 +8,12 @@ A match means the same concrete deliverable, not merely the same project, person
 topic. A restated deadline or a progress update can match. Work spawned after an earlier
 deliverable was completed is new work. Never select an id absent from the candidates.
 
+A mention marked "Stated precondition" already carries a dependency someone said out loud;
+trust it rather than re-deriving one. If that precondition is another candidate's work, set
+blocking_hint to that candidate's commitment_id. If it is something nobody here owns -- a
+person outside the candidates, an approval, another team -- leave blocking_hint null and put
+that person or thing in waiting_on instead.
+
 The mention may include the words actually spoken and enriched detail as well as a tidy
 description. Judge on all of it: a stated dependency usually survives in the spoken words
 and is paraphrased out of the description.
