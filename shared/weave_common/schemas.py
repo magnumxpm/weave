@@ -19,6 +19,25 @@ class CommitmentStatus(StrEnum):
     UNRESOLVED = "unresolved"
 
 
+class CommitmentState(StrEnum):
+    """Human-controlled lifecycle state for a derived commitment."""
+
+    OPEN = "open"
+    WAITING = "waiting"
+    LIKELY_COMPLETE = "likely_complete"
+    CLOSED = "closed"
+
+
+class MentionRelationship(StrEnum):
+    """How an immutable meeting mention relates to its commitment."""
+
+    ORIGINAL = "original"
+    RESTATED = "restated"
+    CARRIED_OVER = "carried_over"
+    PROGRESS_EVIDENCE = "progress_evidence"
+    COMPLETION_EVIDENCE = "completion_evidence"
+
+
 ACTIONABLE_STATUSES: frozenset[CommitmentStatus] = frozenset(
     {CommitmentStatus.ACCEPTED, CommitmentStatus.REASSIGNED}
 )
@@ -146,6 +165,40 @@ class ContextMatch(FrozenModel):
     ref: str | None = None
     score: float | None = Field(default=None, ge=0.0, le=1.0)
     occurred_on: date | None = None
+
+
+class CommitmentMention(FrozenModel):
+    mention_ref: str
+    meeting_date: date
+    relationship: MentionRelationship
+    excerpt: str
+
+
+class Commitment(FrozenModel):
+    commitment_id: str
+    owner_email: str
+    title: str
+    status: CommitmentState
+    status_evidence: str | None = None
+    status_confidence: float | None = Field(default=None, ge=0.0, le=1.0)
+    first_seen: date
+    last_mentioned: date
+    mention_count: int = Field(ge=1)
+    deadline: date | None = None
+    waiting_on: str | None = None
+
+
+class ReconcileDecision(FrozenModel):
+    """Structured same-commitment judgment for one new mention."""
+
+    matched_commitment_id: str | None = None
+    confidence: float = Field(ge=0.0, le=1.0)
+    relationship: MentionRelationship
+    canonical_title: str = Field(max_length=160)
+    inferred_state: CommitmentState
+    state_evidence: str | None = Field(default=None, max_length=300)
+    waiting_on: str | None = Field(default=None, max_length=120)
+    blocking_hint: str | None = Field(default=None, max_length=200)
 
 
 class EnrichedActionItem(FrozenModel):

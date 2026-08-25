@@ -14,6 +14,7 @@ class Settings(BaseModel):
     project_id: str
     region: str
     agent_engine_id: str
+    copilot_engine_id: str = ""
     pubsub_push_sa: str
     pubsub_push_audience: str
     model_armor_input_template: str
@@ -43,6 +44,7 @@ def settings_from_env() -> Settings:
         project_id=os.environ["PROJECT_ID"],
         region=os.environ["REGION"],
         agent_engine_id=os.environ["AGENT_ENGINE_ID"],
+        copilot_engine_id=os.environ.get("COPILOT_ENGINE_ID", ""),
         pubsub_push_sa=os.environ["PUBSUB_PUSH_SA"],
         pubsub_push_audience=os.environ["PUBSUB_PUSH_AUDIENCE"],
         model_armor_input_template=os.environ["MODEL_ARMOR_INPUT_TEMPLATE"],

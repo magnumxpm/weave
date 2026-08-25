@@ -148,6 +148,13 @@ def build_card(
                             item_index=item_index,
                         ),
                         _action_button(
+                            icon="done_all",
+                            alt_text="Mark done",
+                            function="mark_done",
+                            conference_id=conference_id,
+                            item_index=item_index,
+                        ),
+                        _action_button(
                             icon="close",
                             alt_text="Decline",
                             function="decline_item",

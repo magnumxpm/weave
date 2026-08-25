@@ -12,7 +12,8 @@ import base64
 import json
 import logging
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable, Iterable
+from inspect import isawaitable
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -23,11 +24,13 @@ from weave_common import PipelineRequest, PipelineResult
 
 from weave_ingestion.agent_client import AgentEngineClient
 from weave_ingestion.chat_events import ChatClickEvent, parse_chat_event
+from weave_ingestion.commitments import CommitmentStore, make_llm_decider, reconcile_meeting
 from weave_ingestion.config import Settings, settings_from_env
+from weave_ingestion.copilot_client import CopilotEngineClient
 from weave_ingestion.delivery.base import Deliverer, MeetingHeader
 from weave_ingestion.delivery.chat import ChatDeliverer
 from weave_ingestion.delivery.log import LogDeliverer
-from weave_ingestion.firestore_client import MeetingLedger, OnboardedUser
+from weave_ingestion.firestore_client import MeetingLedger, OnboardedUser, WrittenActionItem
 from weave_ingestion.google_sources import (
     DRIVE_SCOPE,
     MAX_LIMIT,
@@ -51,6 +54,9 @@ TokenVerifier = Callable[[str], dict[str, Any]]
 RunPipeline = Callable[[PipelineRequest], PipelineResult]
 TriggerSweep = Callable[[], None]
 WelcomeSender = Callable[[OnboardedUser], None]
+CopilotAsk = Callable[[str, str, str], Awaitable[str] | str]
+ChatTextSender = Callable[[str, str, str | None], None]
+ReconcileRows = Callable[[Iterable[WrittenActionItem]], Any]
 
 
 DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.user.readonly"
@@ -175,7 +181,9 @@ def _build_welcome_sender() -> WelcomeSender:
                                         "textParagraph": {
                                             "text": (
                                                 "Your Meet action items will appear here after "
-                                                "transcription is complete."
+                                                "transcription is complete.<br><br>Ask me anything "
+                                                "about your commitments, e.g. <i>what needs my "
+                                                "attention this week?</i>"
                                             )
                                         }
                                     }
@@ -199,6 +207,32 @@ def _build_welcome_sender() -> WelcomeSender:
         )
 
     return send
+
+
+def _build_chat_text_sender() -> ChatTextSender:
+    client = None
+
+    def send(space_name: str, text: str, message_name: str | None = None) -> None:
+        del message_name  # DMs do not require a thread; keep the seam for future spaces.
+        nonlocal client
+        client = client or _build_chat_client()
+        client.spaces().messages().create(parent=space_name, body={"text": text}).execute()
+
+    return send
+
+
+def _build_reconciler(store: CommitmentStore) -> ReconcileRows:
+    decider = None
+
+    def reconcile(rows: Iterable[WrittenActionItem]) -> Any:
+        nonlocal decider
+        rows = list(rows)
+        if not rows:
+            return []
+        decider = decider or make_llm_decider()
+        return reconcile_meeting(store, decider, rows)
+
+    return reconcile
 
 
 def _meeting_header(request: PipelineRequest, owner_email: str) -> MeetingHeader:
@@ -229,6 +263,10 @@ def create_app(
     welcome_sender: WelcomeSender | None = None,
     broker: GoogleSourceBroker | None = None,
     caller_token_verifier: TokenVerifier | None = None,
+    commitment_store: CommitmentStore | None = None,
+    reconcile_rows: ReconcileRows | None = None,
+    copilot_client: CopilotAsk | None = None,
+    chat_text_sender: ChatTextSender | None = None,
 ) -> FastAPI:
     """Wire the handler; every collaborator is injectable for hermetic tests."""
     directory = None
@@ -244,6 +282,7 @@ def create_app(
         )
     if resolve_subject_email is None and directory is not None:
         resolve_subject_email = directory.email_for_user_id
+    owns_ledger = ledger is None
     if ledger is None:
         ledger = MeetingLedger()
     if deliverer is None:
@@ -267,6 +306,16 @@ def create_app(
 
     trigger_sweep = trigger_sweep or _build_sweep_trigger(settings)
     welcome_sender = welcome_sender or _build_welcome_sender()
+    chat_text_sender = chat_text_sender or _build_chat_text_sender()
+    commitment_store = commitment_store or CommitmentStore()
+    if reconcile_rows is None:
+        # Injected ledgers are generally hermetic tests or local demos. They opt
+        # into reconciliation explicitly; the production ledger always gets it.
+        reconcile_rows = _build_reconciler(commitment_store) if owns_ledger else lambda rows: []
+    if copilot_client is None and settings.copilot_engine_id:
+        copilot_client = CopilotEngineClient(
+            settings.copilot_engine_id, settings.project_id, settings.region
+        ).ask
     broker = broker or _build_google_source_broker(settings)
     if caller_token_verifier is None:
 
@@ -420,17 +469,34 @@ def create_app(
                         extra={"conference_id": conference_id, "owner_email": owner},
                     )
                     delivery_outcomes[owner] = "delivery_failed"
-            ledger.write_action_items(
-                conference_id,
-                result.bundles,
-                visible_to=[attendee.email for attendee in pipeline_request.attendees],
+            written_rows = (
+                ledger.write_action_items(
+                    conference_id,
+                    result.bundles,
+                    visible_to=[attendee.email for attendee in pipeline_request.attendees],
+                )
+                or []
             )
+            reconcile_status = "completed"
+            try:
+                reconcile_rows(written_rows)
+            except Exception:  # noqa: BLE001 - delivery/history already succeeded
+                reconcile_status = "failed"
+                logger.exception(
+                    "commitment reconciliation failed",
+                    extra={"conference_id": conference_id},
+                )
             status = (
                 "delivered_partial"
                 if "delivery_failed" in delivery_outcomes.values()
                 else "delivered"
             )
-            ledger.mark(conference_id, status, delivery_outcomes)
+            ledger.mark(
+                conference_id,
+                status,
+                delivery_outcomes,
+                reconcile=reconcile_status,
+            )
             outcome_counts = Counter(delivery_outcomes.values())
             logger.info(
                 "meeting processed",
@@ -485,6 +551,40 @@ def create_app(
             return Response(status_code=200)
 
         if isinstance(event, ChatClickEvent):
+            if event.function == "mark_done":
+                try:
+                    if resolve_subject_email is None:
+                        raise LookupError("cannot resolve Chat click identity")
+                    owner_email = resolve_subject_email(event.user_id).strip().casefold()
+                    if not event.conference_id or not event.item_index:
+                        raise ValueError("mark_done is missing item identity")
+                    item_index = int(event.item_index)
+                    if item_index < 1:
+                        raise ValueError("item index must start at one")
+                    mention_ref = f"{event.conference_id}--{owner_email}--{item_index - 1}"
+                    commitment_id = commitment_store.commitment_for_mention(mention_ref)
+                    changed = bool(
+                        commitment_id
+                        and commitment_store.close(
+                            commitment_id, owner_email, closed_by="card_click"
+                        )
+                    )
+                    target = ledger.onboarded_by_email().get(owner_email)
+                    if changed and target and target.dm_space:
+                        chat_text_sender(
+                            target.dm_space,
+                            "Done — I marked that commitment complete in Weave.",
+                            None,
+                        )
+                    logger.info(
+                        "Chat commitment close processed",
+                        extra={"user_id": event.user_id, "updated": changed},
+                    )
+                except Exception:  # noqa: BLE001 - click redelivery must not loop
+                    logger.exception(
+                        "Chat commitment close failed", extra={"user_id": event.user_id}
+                    )
+                return Response(status_code=200)
             logger.info(
                 "Chat action-card click acknowledged",
                 extra={
@@ -504,16 +604,43 @@ def create_app(
                 email = resolve_subject_email(event.user_id)
 
             if event.kind == "added":
+                already_onboarded = email.strip().casefold() in ledger.onboarded_by_email()
                 user = ledger.upsert_onboarded_user(
                     user_id=event.user_id,
                     email=email or "",
                     dm_space=event.space_name,
                 )
                 trigger_sweep()
-                try:
-                    welcome_sender(user)
-                except Exception:  # noqa: BLE001 - confirmation is best-effort
-                    logger.exception("welcome delivery failed", extra={"user_id": event.user_id})
+                message = (event.message_text or "").strip()
+                if not already_onboarded:
+                    try:
+                        welcome_sender(user)
+                    except Exception:  # noqa: BLE001 - confirmation is best-effort
+                        logger.exception(
+                            "welcome delivery failed", extra={"user_id": event.user_id}
+                        )
+                if message and not message.startswith("/") and copilot_client is not None:
+                    try:
+                        reply = copilot_client(user.email, event.space_name, message)
+                        if isawaitable(reply):
+                            reply = await reply
+                        chat_text_sender(event.space_name, str(reply), event.message_name)
+                    except Exception:  # noqa: BLE001 - never redeliver a conversational turn
+                        logger.exception(
+                            "Chat copilot failed", extra={"space_name": event.space_name}
+                        )
+                        try:
+                            chat_text_sender(
+                                event.space_name,
+                                "Sorry, I couldn't check your commitments just now. "
+                                "Please try again.",
+                                event.message_name,
+                            )
+                        except Exception:  # noqa: BLE001 - best-effort fixed failure reply
+                            logger.exception(
+                                "Chat copilot apology failed",
+                                extra={"space_name": event.space_name},
+                            )
             else:
                 ledger.mark_offboarding(
                     user_id=event.user_id,

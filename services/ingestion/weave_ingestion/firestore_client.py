@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable, Sequence
-from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
-from weave_common import EnrichedOwnerBundle
+from weave_common import EnrichedActionItem, EnrichedOwnerBundle
 
 logger = logging.getLogger(__name__)
 
@@ -16,6 +17,17 @@ LEASE = timedelta(minutes=15)
 MEETINGS = "processed_meetings"
 ACTION_ITEMS = "action_items"
 ONBOARDED = "onboarded_users"
+
+
+@dataclass(frozen=True)
+class WrittenActionItem:
+    """One persisted mention and the vector already computed for it."""
+
+    mention_ref: str
+    owner_email: str
+    meeting_date: date
+    enriched: EnrichedActionItem
+    embedding: list[float] | None
 
 
 class OnboardedUser(BaseModel):
@@ -101,6 +113,7 @@ class MeetingLedger:
         conference_id: str,
         status: str,
         deliveries: dict[str, str] | None = None,
+        **metadata: Any,
     ) -> None:
         update: dict[str, Any] = {"status": status, "updated_at": datetime.now(UTC)}
         if deliveries is not None:
@@ -110,6 +123,7 @@ class MeetingLedger:
                 email.strip().casefold().replace(".", ","): outcome
                 for email, outcome in deliveries.items()
             }
+        update.update(metadata)
         self.client.collection(MEETINGS).document(conference_id).set(update, merge=True)
 
     def onboarded_users(self) -> list[OnboardedUser]:
@@ -191,7 +205,7 @@ class MeetingLedger:
         conference_id: str,
         bundles: list[EnrichedOwnerBundle],
         visible_to: list[str],
-    ) -> None:
+    ) -> list[WrittenActionItem]:
         """Persist items with the meeting's attendee list as the ACL."""
         from google.cloud.firestore_v1.vector import Vector
 
@@ -220,6 +234,7 @@ class MeetingLedger:
                 logger.exception("action-item embedding failed; writing lexical history only")
                 vectors = None
 
+        written: list[WrittenActionItem] = []
         for row_index, (bundle, index, enriched) in enumerate(rows):
             item = enriched.item
             document = {
@@ -238,4 +253,15 @@ class MeetingLedger:
             }
             if vectors is not None:
                 document["embedding"] = Vector(vectors[row_index])
-            collection.document(f"{conference_id}--{bundle.owner_email}--{index}").set(document)
+            mention_ref = f"{conference_id}--{bundle.owner_email}--{index}"
+            collection.document(mention_ref).set(document)
+            written.append(
+                WrittenActionItem(
+                    mention_ref=mention_ref,
+                    owner_email=bundle.owner_email.strip().casefold(),
+                    meeting_date=bundle.meeting_date,
+                    enriched=enriched,
+                    embedding=vectors[row_index] if vectors is not None else None,
+                )
+            )
+        return written

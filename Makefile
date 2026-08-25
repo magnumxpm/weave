@@ -1,4 +1,4 @@
-.PHONY: install lint test eval web demo onboard backfill-embeddings build-subscription-image infra-init infra-plan infra-pass1 infra-pass2
+.PHONY: install lint test eval web demo onboard backfill-embeddings backfill-commitments build-subscription-image deploy-copilot infra-init infra-plan infra-pass1 infra-pass2
 
 TRANSCRIPT ?= samples/standup.txt
 EVAL_DELAY_SECONDS ?= 25
@@ -37,6 +37,9 @@ onboard:
 backfill-embeddings:
 	uv run python scripts/backfill_embeddings.py $(if $(PROJECT_ID),--project "$(PROJECT_ID)",)
 
+backfill-commitments:
+	uv run python scripts/backfill_commitments.py $(if $(PROJECT_ID),--project "$(PROJECT_ID)",)
+
 IMAGE_TAG ?= $(shell git rev-parse --short HEAD)
 PROJECT_ID ?= $(shell cd infra && $(TF) output -raw project_id 2>/dev/null)
 REGION ?= us-central1
@@ -68,6 +71,14 @@ deploy-agent:
 	CONTEXT_BROKER_URL="$(CONTEXT_BROKER_URL)" \
 	  CONTEXT_BROKER_AUDIENCE="$(CONTEXT_BROKER_AUDIENCE)" \
 	  uv run python agent/deployment/deploy.py
+
+deploy-copilot:
+	@test -n "$(CONTEXT_BROKER_URL)" || (echo "CONTEXT_BROKER_URL is required" && exit 1)
+	@test -n "$(CONTEXT_BROKER_AUDIENCE)" || (echo "CONTEXT_BROKER_AUDIENCE is required" && exit 1)
+	rm -rf dist && uv build --all-packages
+	CONTEXT_BROKER_URL="$(CONTEXT_BROKER_URL)" \
+	  CONTEXT_BROKER_AUDIENCE="$(CONTEXT_BROKER_AUDIENCE)" \
+	  uv run python agent/deployment/deploy_copilot.py
 
 infra-init:
 	cd infra && $(TF) init

@@ -74,6 +74,7 @@ def test_addon_direct_message_onboards() -> None:
         user_id="123",
         email="user@example.com",
         space_name="spaces/dm",
+        message_text="hi",
     )
 
 
@@ -81,6 +82,22 @@ def test_addon_space_may_live_inside_the_payload() -> None:
     parsed = parse_chat_event(addon_event("messagePayload", space_beside_payload=False))
     assert parsed is not None
     assert parsed.space_name == "spaces/dm"
+
+
+def test_message_text_and_name_are_extracted_from_both_envelopes() -> None:
+    flat = event("MESSAGE")
+    flat["message"] = {"name": "spaces/dm/messages/1", "text": "what is stale?"}
+    parsed_flat = parse_chat_event(flat)
+    assert parsed_flat is not None
+    assert parsed_flat.message_text == "what is stale?"
+    assert parsed_flat.message_name == "spaces/dm/messages/1"
+
+    addon = addon_event("messagePayload")
+    addon["chat"]["messagePayload"]["message"]["name"] = "spaces/dm/messages/2"
+    parsed_addon = parse_chat_event(addon)
+    assert parsed_addon is not None
+    assert parsed_addon.message_text == "hi"
+    assert parsed_addon.message_name == "spaces/dm/messages/2"
 
 
 def test_addon_added_and_removed_payloads_map_to_kinds() -> None:

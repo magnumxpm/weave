@@ -103,7 +103,9 @@ topic simply stays empty.
 different. Each user chooses Chat → New chat → Weave and **sends it any
 message**. That event stores the user's numeric id and exact DM space in
 Firestore, then submits an immediate subscription-manager sweep. A welcome card
-confirms that provisioning was queued. Removal is not always signalled for
+confirms that provisioning was queued and introduces commitment questions. Once
+`COPILOT_ENGINE_ID` is configured, later messages are sent to the owner-scoped
+copilot. Removal is not always signalled for
 direct messages, so offboard with the ledger if a user must be removed.
 
 Do not force-install the app across the organisation for self-serve mode:
@@ -263,6 +265,57 @@ and still has no delegation. Roll out in this order:
 
 A non-onboarded attendee receives no Docs or Tasks context. Any broker, API, or source
 failure degrades to no results from that source and does not stop the other sources.
+
+## 12. Commitment graph and copilot rollout
+
+The copilot is a second Agent Engine deployment. It uses `weave-agent-sa`, which keeps its
+existing Firestore and Vertex roles, has no domain-wide delegation, and reaches delegated
+Docs/Tasks reads only through `/context/search`.
+
+1. Apply the `commitments_vector` and `commitments_last_mentioned` Firestore indexes and
+   wait for both to report `READY`. Review the plan carefully: Firestore index field changes
+   are ForceNew and a replacement is a real availability event.
+2. Deploy ingestion first. New meetings now write immutable action-item mentions and then
+   reconcile them into owner-scoped `commitments`; reconciliation failure is recorded on
+   the processed meeting but never fails delivery.
+3. Run `make backfill-commitments PROJECT_ID=<PROJECT_ID>`. The command is replay-safe via
+   UUIDv5 commitment ids and mention subdocument ids. Spot-check merges before exposing the
+   copilot: same deliverable across meetings should merge; same topic alone must not.
+4. Deploy the ADK app:
+
+   ```bash
+   export PROJECT_ID=<PROJECT_ID> REGION=us-central1
+   export AGENT_SA=weave-agent-sa@$PROJECT_ID.iam.gserviceaccount.com
+   make deploy-copilot
+   # COPILOT_ENGINE_ID=projects/.../reasoningEngines/N
+   ```
+
+5. Set `copilot_engine_id` to that resource name and apply Terraform. An empty value is the
+   rollback switch: Chat messages retain onboarding behavior and simply do not invoke the
+   copilot. The Chat push subscription uses a 600-second ack deadline to match Cloud Run.
+6. In Chat, ask “what needs my attention?” as two onboarded test users and verify that each
+   answer contains only that owner's commitments. Click **Mark done** on a delivered card;
+   only the linked Weave commitment should close, and replaying the click must be harmless.
+
+### Gemini Enterprise registration
+
+Google's current Agent Runtime registration documentation states that ADK agents receive
+the invoking user's email. Weave still fails closed unless the runtime supplies that value
+as an email-shaped ADK `user_id`; it never asks the model or user to identify the caller.
+Before domain rollout, register the engine in Gemini Enterprise → app → Agents → Add agent →
+Custom agent via Agent Runtime, using display name **Weave Commitment Copilot** and the full
+`COPILOT_ENGINE_ID` resource path. No optional per-user OAuth authorization is needed because
+Google reads remain brokered by ingestion.
+
+Run the load-bearing identity tests before sharing it: invoke as user A and confirm logs and
+tool results resolve A; invoke as user B and ask for A's commitments and confirm only B-owned
+documents can be read. If the runtime does not pass the email as the verified ADK `user_id`,
+unregister the agent and keep only Chat until the platform identity field is mapped in
+`agent/copilot/principal.py`. Do not relax the validator.
+
+To unregister, open the Gemini Enterprise app's Agents page and delete the registered agent,
+or call the documented Discovery Engine agent-resource `DELETE`; deleting the registration
+does not delete the Agent Engine deployment.
 
 ## Traps hit while building this (all cost a debugging cycle)
 

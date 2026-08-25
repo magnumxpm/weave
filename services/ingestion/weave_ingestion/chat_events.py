@@ -39,10 +39,12 @@ class ChatEvent(BaseModel):
     user_id: str
     email: str | None = None
     space_name: str
+    message_text: str | None = None
+    message_name: str | None = None
 
 
 class ChatClickEvent(BaseModel):
-    """A deliberately non-mutating action-card click."""
+    """A platform-authenticated action-card click."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -60,18 +62,21 @@ def _is_direct_message(space: dict[str, Any]) -> bool:
     )
 
 
-def _unwrap(payload: dict[str, Any]) -> tuple[Kind, Any, Any] | None:
-    """Reduce either envelope to (kind, user, space)."""
+def _unwrap(payload: dict[str, Any]) -> tuple[Kind, Any, Any, Any] | None:
+    """Reduce either envelope to (kind, user, space, message)."""
     if isinstance(chat := payload.get("chat"), dict):
         for field, kind in ADDON_KINDS.items():
             if isinstance(inner := chat.get(field), dict):
                 # The space rides beside the payload on some interactions and
                 # inside it on others; prefer whichever is present.
-                return kind, chat.get("user"), chat.get("space") or inner.get("space")
+                message = inner.get("message") if field == "messagePayload" else None
+                return kind, chat.get("user"), chat.get("space") or inner.get("space"), message
         return None
 
     kind = FLAT_KINDS.get(payload.get("type") or payload.get("eventType"))
-    return (kind, payload.get("user"), payload.get("space")) if kind else None
+    if kind is None:
+        return None
+    return kind, payload.get("user"), payload.get("space"), payload.get("message")
 
 
 def _parameters(value: Any) -> dict[str, str]:
@@ -136,7 +141,7 @@ def parse_chat_event(payload: Any) -> ChatEvent | ChatClickEvent | None:
     unwrapped = _unwrap(payload)
     if unwrapped is None:
         return None
-    kind, user, space = unwrapped
+    kind, user, space, message = unwrapped
 
     if not isinstance(user, dict) or not isinstance(space, dict) or not _is_direct_message(space):
         return None
@@ -156,9 +161,14 @@ def parse_chat_event(payload: Any) -> ChatEvent | ChatClickEvent | None:
         return None
 
     email = user.get("email")
+    message = message if isinstance(message, dict) else {}
+    message_text = message.get("text")
+    message_name = message.get("name")
     return ChatEvent(
         kind=kind,
         user_id=user_id,
         email=email if isinstance(email, str) and email.strip() else None,
         space_name=space_name,
+        message_text=message_text if isinstance(message_text, str) else None,
+        message_name=message_name if isinstance(message_name, str) else None,
     )

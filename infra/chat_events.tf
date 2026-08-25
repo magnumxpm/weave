@@ -26,7 +26,7 @@ resource "google_pubsub_subscription" "chat_events_push" {
   count                = var.create_cloud_run ? 1 : 0
   name                 = "chat-events-push"
   topic                = google_pubsub_topic.chat_events.id
-  ack_deadline_seconds = 60
+  ack_deadline_seconds = 600
 
   push_config {
     push_endpoint = "${google_cloud_run_v2_service.ingestion[0].uri}/chat-events"

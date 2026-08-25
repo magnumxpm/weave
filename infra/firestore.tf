@@ -56,3 +56,70 @@ resource "google_firestore_index" "action_items_vector" {
     }
   }
 }
+
+# Owner equality is part of the commitment vector lookup, so another owner's
+# derived commitment cannot enter candidate reconciliation.
+resource "google_firestore_index" "commitments_vector" {
+  database   = google_firestore_database.default.name
+  collection = "commitments"
+
+  fields {
+    field_path = "owner_email"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "embedding"
+    vector_config {
+      dimension = 768
+      flat {}
+    }
+  }
+}
+
+resource "google_firestore_index" "commitments_last_mentioned" {
+  database   = google_firestore_database.default.name
+  collection = "commitments"
+
+  fields {
+    field_path = "owner_email"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "last_mentioned"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "ASCENDING"
+  }
+}
+
+# Reconciliation's lexical fallback takes the newest owner commitments before
+# applying relevance ranking; keep that read distinct from the ascending stale query.
+resource "google_firestore_index" "commitments_recent" {
+  database   = google_firestore_database.default.name
+  collection = "commitments"
+
+  fields {
+    field_path = "owner_email"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "last_mentioned"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}

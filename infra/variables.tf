@@ -27,6 +27,12 @@ variable "agent_engine_id" {
   description = "Full reasoning engine resource name (required when create_cloud_run=true)."
 }
 
+variable "copilot_engine_id" {
+  type        = string
+  default     = ""
+  description = "ADK copilot reasoning engine resource name. Empty keeps Chat query handling disabled."
+}
+
 variable "create_subscription_manager" {
   type        = bool
   default     = false

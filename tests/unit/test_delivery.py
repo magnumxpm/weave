@@ -171,9 +171,10 @@ def test_deadline_is_omitted_when_absent() -> None:
 def test_buttons_have_accessible_labels_and_stable_action_parameters() -> None:
     item_section = build_card(bundle())["card"]["sections"][0]
     buttons = item_section["widgets"][-1]["buttonList"]["buttons"]
-    assert [button["altText"] for button in buttons] == ["Accept", "Decline"]
+    assert [button["altText"] for button in buttons] == ["Accept", "Mark done", "Decline"]
     assert [button["onClick"]["action"]["function"] for button in buttons] == [
         "accept_item",
+        "mark_done",
         "decline_item",
     ]
     assert buttons[0]["onClick"]["action"]["parameters"] == [

@@ -119,6 +119,7 @@ class FakeLedger:
             )
         }
         self.deliveries: dict[str, dict[str, str]] = {}
+        self.mark_metadata: dict[str, dict[str, Any]] = {}
         self.onboarding_writes: list[OnboardedUser] = []
         self.offboarding_writes: list[dict[str, Any]] = []
 
@@ -133,8 +134,10 @@ class FakeLedger:
         conference_id: str,
         status: str,
         deliveries: dict[str, str] | None = None,
+        **metadata: Any,
     ) -> None:
         self.status[conference_id] = status
+        self.mark_metadata[conference_id] = metadata
         if deliveries is not None:
             self.deliveries[conference_id] = deliveries
 
@@ -247,6 +250,10 @@ def build(
     resolve_subject_email: Any = None,
     broker: Any = None,
     caller_token_verifier: Any = None,
+    commitment_store: Any = None,
+    reconcile_rows: Any = None,
+    copilot_client: Any = None,
+    chat_text_sender: Any = None,
 ) -> tuple[TestClient, FakeSource, FakeLedger, RecordingDeliverer, FakeScreen]:
     source = FakeSource()
     ledger = ledger or FakeLedger()
@@ -265,6 +272,10 @@ def build(
         resolve_subject_email=resolve_subject_email,
         broker=broker,
         caller_token_verifier=caller_token_verifier or (lambda token: {}),
+        commitment_store=commitment_store,
+        reconcile_rows=reconcile_rows,
+        copilot_client=copilot_client,
+        chat_text_sender=chat_text_sender,
     )
     client = TestClient(app, raise_server_exceptions=False)
     return client, source, ledger, deliverer, screen
@@ -618,6 +629,124 @@ def test_chat_event_bad_oidc_is_rejected() -> None:
         headers=AUTH,
     )
     assert response.status_code == 403
+
+
+def test_chat_question_calls_copilot_as_resolved_principal_and_posts_reply() -> None:
+    calls: list[tuple[str, str, str]] = []
+    replies: list[tuple[str, str, str | None]] = []
+
+    async def ask(principal: str, space: str, message: str) -> str:
+        calls.append((principal, space, message))
+        return "Your launch brief is overdue."
+
+    payload = chat_event("MESSAGE")
+    payload["message"] = {
+        "name": "spaces/chat-user/messages/1",
+        "text": "what needs attention?",
+    }
+    client, *_ = build(
+        copilot_client=ask,
+        chat_text_sender=lambda space, text, message_name: replies.append(
+            (space, text, message_name)
+        ),
+    )
+    response = client.post("/chat-events", json=chat_push_body(payload), headers=AUTH)
+
+    assert response.status_code == 200
+    assert calls == [("chat-user@example.com", "spaces/chat-user", "what needs attention?")]
+    assert replies == [
+        (
+            "spaces/chat-user",
+            "Your launch brief is overdue.",
+            "spaces/chat-user/messages/1",
+        )
+    ]
+
+
+def test_chat_copilot_failure_acks_and_posts_fixed_apology() -> None:
+    replies: list[str] = []
+
+    async def fail(*args: Any) -> str:
+        raise RuntimeError("engine unavailable")
+
+    payload = chat_event("MESSAGE")
+    payload["message"] = {"text": "what is stale?"}
+    client, *_ = build(
+        copilot_client=fail,
+        chat_text_sender=lambda space, text, message_name: replies.append(text),
+    )
+    response = client.post("/chat-events", json=chat_push_body(payload), headers=AUTH)
+    assert response.status_code == 200
+    assert replies == ["Sorry, I couldn't check your commitments just now. Please try again."]
+
+
+def test_slash_command_and_disabled_copilot_keep_onboarding_only() -> None:
+    calls: list[str] = []
+    payload = chat_event("MESSAGE")
+    payload["message"] = {"text": "/help"}
+    client, *_ = build(copilot_client=lambda *args: calls.append("called"))
+    assert (
+        client.post("/chat-events", json=chat_push_body(payload), headers=AUTH).status_code == 200
+    )
+
+    payload["message"] = {"text": "hello"}
+    disabled, *_ = build()
+    assert (
+        disabled.post("/chat-events", json=chat_push_body(payload), headers=AUTH).status_code == 200
+    )
+    assert calls == []
+
+
+class FakeCommitmentStore:
+    def __init__(self, owner_match: bool = True) -> None:
+        self.owner_match = owner_match
+        self.close_calls: list[tuple[str, str, str]] = []
+
+    def commitment_for_mention(self, mention_ref: str) -> str | None:
+        assert mention_ref == "abc--chat-user@example.com--0"
+        return "commitment-1"
+
+    def close(self, commitment_id: str, owner: str, closed_by: str) -> bool:
+        self.close_calls.append((commitment_id, owner, closed_by))
+        return self.owner_match
+
+
+def test_mark_done_maps_one_based_card_index_and_uses_clicker_identity() -> None:
+    store = FakeCommitmentStore()
+    confirmations: list[str] = []
+    ledger = FakeLedger()
+    ledger.onboarded["chat-user@example.com"] = OnboardedUser(
+        user_id="303", email="chat-user@example.com", dm_space="spaces/chat-user"
+    )
+    client, *_ = build(
+        ledger=ledger,
+        commitment_store=store,
+        resolve_subject_email=lambda user_id: "chat-user@example.com",
+        chat_text_sender=lambda space, text, message_name: confirmations.append(text),
+    )
+    payload = chat_event("CARD_CLICKED")
+    payload["action"] = {
+        "actionMethodName": "mark_done",
+        "parameters": [
+            {"key": "conference_id", "value": "abc"},
+            {"key": "item_index", "value": "1"},
+        ],
+    }
+    response = client.post("/chat-events", json=chat_push_body(payload), headers=AUTH)
+    assert response.status_code == 200
+    assert store.close_calls == [("commitment-1", "chat-user@example.com", "card_click")]
+    assert confirmations == ["Done — I marked that commitment complete in Weave."]
+
+
+def test_reconciliation_failure_does_not_change_delivered_outcome() -> None:
+    def fail(rows: Any) -> None:
+        raise RuntimeError("reconcile unavailable")
+
+    client, _, ledger, _, _ = build(reconcile_rows=fail)
+    response = client.post("/pubsub-push", json=push_body(), headers=AUTH)
+    assert response.status_code == 200
+    assert ledger.status["abc123"] == "delivered"
+    assert ledger.mark_metadata["abc123"] == {"reconcile": "failed"}
     assert ledger.onboarding_writes == []
 
 
