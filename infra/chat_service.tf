@@ -22,6 +22,13 @@ resource "google_cloud_run_v2_service" "chat" {
   ingress             = "INGRESS_TRAFFIC_ALL"
   deletion_protection = false
 
+  # Service-level scaling is defaulted by Cloud Run whether or not it is
+  # declared, so declaring it is what stops `tofu plan` drifting every run.
+  # Warm instances are configured on the revision below.
+  scaling {
+    min_instance_count = 0
+  }
+
   template {
     service_account = google_service_account.chat.email
     # Chat gives an interaction a few tens of seconds; this is a backstop, not a
