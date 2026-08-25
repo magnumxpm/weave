@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from functools import lru_cache
 from typing import Any
 
 from google.adk.tools.tool_context import ToolContext
+from weave_common import decorate_rows
 
 from agent.context_sources.broker_client import fetch_broker_matches
 from agent.copilot.store_reader import CopilotStoreReader
@@ -32,63 +33,6 @@ def _principal(tool_context: ToolContext) -> str | None:
         logger.warning("copilot tool refused: no valid principal")
         return None
     return value.strip().casefold()
-
-
-def _as_date(value: Any) -> date | None:
-    if isinstance(value, datetime):
-        return value.date()
-    if isinstance(value, date):
-        return value
-    if isinstance(value, str):
-        try:
-            return date.fromisoformat(value)
-        except ValueError:
-            return None
-    return None
-
-
-def _transitive_dependents(commitments: list[dict[str, Any]]) -> dict[str, int]:
-    open_ids = {
-        str(row["commitment_id"])
-        for row in commitments
-        if row.get("status") != "closed" and row.get("commitment_id")
-    }
-    reverse: dict[str, set[str]] = {item: set() for item in open_ids}
-    for row in commitments:
-        dependent = str(row.get("commitment_id") or "")
-        if dependent not in open_ids:
-            continue
-        for blocker in row.get("blocked_by") or []:
-            if blocker in open_ids:
-                reverse.setdefault(str(blocker), set()).add(dependent)
-
-    counts: dict[str, int] = {}
-    for root in open_ids:
-        seen: set[str] = set()
-        frontier = list(reverse.get(root, set()))
-        while frontier:
-            current = frontier.pop()
-            if current in seen or current == root:
-                continue
-            seen.add(current)
-            frontier.extend(reverse.get(current, set()))
-        counts[root] = len(seen)
-    return counts
-
-
-def _attention_score(row: dict[str, Any], dependent_count: int, today: date) -> int:
-    deadline = _as_date(row.get("deadline"))
-    last = _as_date(row.get("last_mentioned")) or today
-    score = dependent_count * 200
-    if deadline and deadline < today and row.get("status") != "closed":
-        score += 1000 + min((today - deadline).days, 365)
-    if row.get("status") == "waiting" and (today - last).days >= 7:
-        score += 500 + min((today - last).days, 365)
-    if row.get("status") == "open":
-        score += min(int(row.get("mention_count") or 0), 50) * 10
-    if row.get("status") == "likely_complete":
-        score -= 50
-    return score
 
 
 def list_my_commitments(status_filter: str, tool_context: ToolContext) -> list[dict[str, Any]]:
@@ -116,20 +60,7 @@ def list_my_commitments(status_filter: str, tool_context: ToolContext) -> list[d
         ]
     rows = _store().list_commitments(principal, normalized_filter)
     all_rows = rows if not normalized_filter else _store().list_commitments(principal)
-    dependents = _transitive_dependents(all_rows)
-    today = datetime.now(UTC).date()
-    for row in rows:
-        item_id = str(row.get("commitment_id") or "")
-        row["attention_score"] = _attention_score(row, dependents.get(item_id, 0), today)
-        row["open_dependents"] = dependents.get(item_id, 0)
-    return sorted(
-        rows,
-        key=lambda row: (
-            -int(row["attention_score"]),
-            str(row.get("deadline") or "9999-12-31"),
-            str(row.get("commitment_id") or ""),
-        ),
-    )
+    return decorate_rows(rows, all_rows=all_rows, today=datetime.now(UTC).date())
 
 
 def get_commitment_history(commitment_id: str, tool_context: ToolContext) -> dict[str, Any]:
@@ -144,7 +75,16 @@ def get_commitment_history(commitment_id: str, tool_context: ToolContext) -> dic
 def find_stale_commitments(days: int, tool_context: ToolContext) -> list[dict[str, Any]]:
     """Find my open or waiting commitments not mentioned for the requested age."""
     principal = _principal(tool_context)
-    return [] if principal is None else _store().stale(principal, days)
+    if principal is None:
+        return []
+    stale = _store().stale(principal, days)
+    if not stale:
+        return []
+    # The stale slice is ordered by last_mentioned, and unblock impact cannot be
+    # computed from a slice, so rank against the owner's full set.
+    return decorate_rows(
+        stale, all_rows=_store().list_commitments(principal), today=datetime.now(UTC).date()
+    )
 
 
 def trace_blockers(commitment_id: str, tool_context: ToolContext) -> list[dict[str, Any]]:

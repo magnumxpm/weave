@@ -13,6 +13,7 @@ import json
 import logging
 from collections import Counter
 from collections.abc import Awaitable, Callable, Iterable
+from datetime import UTC, datetime
 from inspect import isawaitable
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
@@ -55,7 +56,7 @@ RunPipeline = Callable[[PipelineRequest], PipelineResult]
 TriggerSweep = Callable[[], None]
 WelcomeSender = Callable[[OnboardedUser], None]
 CopilotAsk = Callable[[str, str, str], Awaitable[str] | str]
-ChatTextSender = Callable[[str, str, str | None], None]
+ChatMessageSender = Callable[[str, dict[str, Any], str | None], None]
 ReconcileRows = Callable[[Iterable[WrittenActionItem]], Any]
 
 
@@ -209,16 +210,35 @@ def _build_welcome_sender() -> WelcomeSender:
     return send
 
 
-def _build_chat_text_sender() -> ChatTextSender:
+def _build_chat_message_sender() -> ChatMessageSender:
     client = None
 
-    def send(space_name: str, text: str, message_name: str | None = None) -> None:
+    def send(space_name: str, body: dict[str, Any], message_name: str | None = None) -> None:
         del message_name  # DMs do not require a thread; keep the seam for future spaces.
         nonlocal client
         client = client or _build_chat_client()
-        client.spaces().messages().create(parent=space_name, body={"text": text}).execute()
+        client.spaces().messages().create(parent=space_name, body=body).execute()
 
     return send
+
+
+def _copilot_body(answer: Any) -> dict[str, Any]:
+    """Draw a commitment listing as a card; leave ordinary answers as text.
+
+    The prose rides along above the card rather than being replaced by it, so a
+    Chat reader and a Gemini Enterprise reader are told the same thing -- the
+    card is a nicer rendering of that answer, not a different answer.
+    """
+    from weave_ingestion.copilot_client import CopilotAnswer
+    from weave_ingestion.delivery.chat_text import to_chat_text
+    from weave_ingestion.delivery.commitment_card import build_card_from_rows
+
+    if not isinstance(answer, CopilotAnswer):
+        return {"text": to_chat_text(str(answer))}
+    body: dict[str, Any] = {"text": to_chat_text(answer.text)}
+    if rows := answer.commitment_rows():
+        body["cardsV2"] = [build_card_from_rows(rows, today=datetime.now(UTC).date())]
+    return body
 
 
 def _build_reconciler(store: CommitmentStore) -> ReconcileRows:
@@ -266,7 +286,7 @@ def create_app(
     commitment_store: CommitmentStore | None = None,
     reconcile_rows: ReconcileRows | None = None,
     copilot_client: CopilotAsk | None = None,
-    chat_text_sender: ChatTextSender | None = None,
+    chat_message_sender: ChatMessageSender | None = None,
 ) -> FastAPI:
     """Wire the handler; every collaborator is injectable for hermetic tests."""
     directory = None
@@ -306,7 +326,7 @@ def create_app(
 
     trigger_sweep = trigger_sweep or _build_sweep_trigger(settings)
     welcome_sender = welcome_sender or _build_welcome_sender()
-    chat_text_sender = chat_text_sender or _build_chat_text_sender()
+    chat_message_sender = chat_message_sender or _build_chat_message_sender()
     commitment_store = commitment_store or CommitmentStore()
     if reconcile_rows is None:
         # Injected ledgers are generally hermetic tests or local demos. They opt
@@ -571,9 +591,9 @@ def create_app(
                     )
                     target = ledger.onboarded_by_email().get(owner_email)
                     if changed and target and target.dm_space:
-                        chat_text_sender(
+                        chat_message_sender(
                             target.dm_space,
-                            "Done — I marked that commitment complete in Weave.",
+                            {"text": "Done — I marked that commitment complete in Weave."},
                             None,
                         )
                     logger.info(
@@ -624,16 +644,20 @@ def create_app(
                         reply = copilot_client(user.email, event.space_name, message)
                         if isawaitable(reply):
                             reply = await reply
-                        chat_text_sender(event.space_name, str(reply), event.message_name)
+                        chat_message_sender(
+                            event.space_name, _copilot_body(reply), event.message_name
+                        )
                     except Exception:  # noqa: BLE001 - never redeliver a conversational turn
                         logger.exception(
                             "Chat copilot failed", extra={"space_name": event.space_name}
                         )
                         try:
-                            chat_text_sender(
+                            chat_message_sender(
                                 event.space_name,
-                                "Sorry, I couldn't check your commitments just now. "
-                                "Please try again.",
+                                {
+                                    "text": "Sorry, I couldn't check your commitments "
+                                    "just now. Please try again."
+                                },
                                 event.message_name,
                             )
                         except Exception:  # noqa: BLE001 - best-effort fixed failure reply

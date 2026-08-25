@@ -253,7 +253,7 @@ def build(
     commitment_store: Any = None,
     reconcile_rows: Any = None,
     copilot_client: Any = None,
-    chat_text_sender: Any = None,
+    chat_message_sender: Any = None,
 ) -> tuple[TestClient, FakeSource, FakeLedger, RecordingDeliverer, FakeScreen]:
     source = FakeSource()
     ledger = ledger or FakeLedger()
@@ -275,7 +275,7 @@ def build(
         commitment_store=commitment_store,
         reconcile_rows=reconcile_rows,
         copilot_client=copilot_client,
-        chat_text_sender=chat_text_sender,
+        chat_message_sender=chat_message_sender,
     )
     client = TestClient(app, raise_server_exceptions=False)
     return client, source, ledger, deliverer, screen
@@ -646,8 +646,8 @@ def test_chat_question_calls_copilot_as_resolved_principal_and_posts_reply() -> 
     }
     client, *_ = build(
         copilot_client=ask,
-        chat_text_sender=lambda space, text, message_name: replies.append(
-            (space, text, message_name)
+        chat_message_sender=lambda space, body, message_name: replies.append(
+            (space, body["text"], message_name)
         ),
     )
     response = client.post("/chat-events", json=chat_push_body(payload), headers=AUTH)
@@ -673,7 +673,7 @@ def test_chat_copilot_failure_acks_and_posts_fixed_apology() -> None:
     payload["message"] = {"text": "what is stale?"}
     client, *_ = build(
         copilot_client=fail,
-        chat_text_sender=lambda space, text, message_name: replies.append(text),
+        chat_message_sender=lambda space, body, message_name: replies.append(body["text"]),
     )
     response = client.post("/chat-events", json=chat_push_body(payload), headers=AUTH)
     assert response.status_code == 200
@@ -722,7 +722,7 @@ def test_mark_done_maps_one_based_card_index_and_uses_clicker_identity() -> None
         ledger=ledger,
         commitment_store=store,
         resolve_subject_email=lambda user_id: "chat-user@example.com",
-        chat_text_sender=lambda space, text, message_name: confirmations.append(text),
+        chat_message_sender=lambda space, body, message_name: confirmations.append(body["text"]),
     )
     payload = chat_event("CARD_CLICKED")
     payload["action"] = {

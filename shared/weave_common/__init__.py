@@ -1,5 +1,18 @@
 """Shared, dependency-light Weave contracts."""
 
+from weave_common.commitment_view import (
+    GROUP_ICONS,
+    GROUP_LABELS,
+    CommitmentView,
+    UrgencyBucket,
+    UrgencyGroup,
+    attention_score,
+    build_views,
+    decorate_rows,
+    group_views,
+    summarize,
+    transitive_dependents,
+)
 from weave_common.relevance import rank, terms
 from weave_common.schemas import (
     ACTIONABLE_STATUSES,
@@ -28,6 +41,8 @@ from weave_common.schemas import (
 
 __all__ = [
     "ACTIONABLE_STATUSES",
+    "GROUP_ICONS",
+    "GROUP_LABELS",
     "IDENTITY_CONFIDENCE_FLOOR",
     "ActionItem",
     "ActionType",
@@ -36,6 +51,7 @@ __all__ = [
     "CommitmentMention",
     "CommitmentState",
     "CommitmentStatus",
+    "CommitmentView",
     "ContextMatch",
     "EnrichedActionItem",
     "EnrichedOwnerBundle",
@@ -49,6 +65,14 @@ __all__ = [
     "ReferenceStatus",
     "ReconcileDecision",
     "TranscriptTurn",
+    "UrgencyBucket",
+    "UrgencyGroup",
+    "attention_score",
+    "build_views",
+    "decorate_rows",
+    "group_views",
     "rank",
+    "summarize",
     "terms",
+    "transitive_dependents",
 ]
