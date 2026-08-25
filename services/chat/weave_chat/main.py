@@ -84,6 +84,23 @@ class OnboardedReader:
         return email.strip().casefold() if isinstance(email, str) and email else None
 
 
+def _payload_shape(value: Any, depth: int = 0) -> Any:
+    """Key structure of a payload, three levels deep, with no leaf values.
+
+    The envelope Chat sends over an HTTP endpoint is not documented against the
+    Pub/Sub shape this codebase grew up on, and a click that fails to parse is
+    silently republished as if it were a message. Logging the shape -- never the
+    content -- lets one real interaction document itself.
+    """
+    if isinstance(value, dict):
+        if depth >= 3:
+            return sorted(value)
+        return {key: _payload_shape(item, depth + 1) for key, item in sorted(value.items())}
+    if isinstance(value, list):
+        return [_payload_shape(value[0], depth + 1)] if value else []
+    return type(value).__name__
+
+
 def create_app(
     settings: ChatSettings,
     *,
@@ -210,7 +227,10 @@ def create_app(
             return JSONResponse({})
 
         addon = is_addon_envelope(body)
-        logger.info("Chat interaction received", extra={"envelope_dialect": dialect_of(body)})
+        logger.info(
+            "Chat interaction received",
+            extra={"envelope_dialect": dialect_of(body), "shape": _payload_shape(body)},
+        )
         event = parse_chat_event(body)
 
         if isinstance(event, ChatClickEvent):
