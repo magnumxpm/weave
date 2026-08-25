@@ -3,7 +3,7 @@
 create_cloud_run  = true
 agent_engine_id   = "projects/884578202776/locations/us-central1/reasoningEngines/5096941731450978304"
 copilot_engine_id = "projects/884578202776/locations/us-central1/reasoningEngines/6586098289878237184"
-image_tag         = "8519ae4"
+image_tag         = "1d6b2bb"
 
 create_subscription_manager    = true
 subscription_manager_image_tag = "e425c98"
