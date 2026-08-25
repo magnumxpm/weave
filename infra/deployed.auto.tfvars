@@ -13,5 +13,5 @@ delivery_mode   = "chat"
 admin_subject   = "me@pmukherjee.dev" # directory lookups only, not Meet reads
 
 create_chat_service = true
-chat_image_tag      = "4ab7906"
+chat_image_tag      = "c26584f"
 chat_audience       = "https://weave-chat-32iyowmc5q-uc.a.run.app"
