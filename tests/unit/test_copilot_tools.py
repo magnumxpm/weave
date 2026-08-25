@@ -87,3 +87,21 @@ def test_close_uses_only_principal_from_state(monkeypatch: Any) -> None:
     result = tools.close_commitment("overdue", Context("owner@example.com"))  # type: ignore[arg-type]
     assert result["updated"] is True
     assert store.closed == [("owner@example.com", "overdue")]
+
+
+def test_all_lists_everything_and_a_bad_filter_is_an_error_not_an_empty_list(
+    monkeypatch: Any,
+) -> None:
+    """The live model sent status_filter="all" and got [] back, so it told the
+    user they had no commitments while six sat in the graph. An unusable filter
+    has to be distinguishable from a genuinely empty list."""
+    monkeypatch.setattr(tools, "_store", lambda: Store())
+    context = Context("owner@example.com")
+
+    for spelling in ("all", "ALL", " any ", "*", ""):
+        assert len(tools.list_my_commitments(spelling, context)) == 3  # type: ignore[arg-type]
+
+    bad = tools.list_my_commitments("in_progress", context)  # type: ignore[arg-type]
+    assert len(bad) == 1
+    assert "error" in bad[0]
+    assert "all" in bad[0]["valid_status_filter_values"]

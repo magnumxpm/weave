@@ -15,6 +15,10 @@ from agent.copilot.store_reader import CopilotStoreReader
 
 logger = logging.getLogger(__name__)
 ALLOWED_EVIDENCE_SOURCES = frozenset({"google_docs", "google_tasks"})
+COMMITMENT_STATES = frozenset({"open", "waiting", "likely_complete", "closed"})
+# Spellings a model reaches for when it means "do not filter". "" is the
+# documented value, but "all" is what it actually sends.
+EVERY_STATUS = frozenset({"", "all", "any", "*"})
 
 
 @lru_cache(maxsize=1)
@@ -88,14 +92,28 @@ def _attention_score(row: dict[str, Any], dependent_count: int, today: date) -> 
 
 
 def list_my_commitments(status_filter: str, tool_context: ToolContext) -> list[dict[str, Any]]:
-    """List my commitments ordered by deterministic urgency and unblock impact."""
+    """List my commitments, most urgent first.
+
+    Args:
+        status_filter: One of "open", "waiting", "likely_complete", "closed",
+            or "" / "all" for every status. Any other value is an error.
+    """
     principal = _principal(tool_context)
     if principal is None:
         return []
-    allowed = {"", "open", "waiting", "likely_complete", "closed"}
     normalized_filter = status_filter.strip().casefold()
-    if normalized_filter not in allowed:
-        return []
+    if normalized_filter in EVERY_STATUS:
+        normalized_filter = ""
+    elif normalized_filter not in COMMITMENT_STATES:
+        # Never answer an unusable filter with []: the model cannot tell that
+        # apart from "you have no commitments" and will report absence as fact.
+        logger.warning("copilot rejected unknown status filter")
+        return [
+            {
+                "error": f"unknown status_filter {status_filter!r}",
+                "valid_status_filter_values": sorted(COMMITMENT_STATES | {"all"}),
+            }
+        ]
     rows = _store().list_commitments(principal, normalized_filter)
     all_rows = rows if not normalized_filter else _store().list_commitments(principal)
     dependents = _transitive_dependents(all_rows)
