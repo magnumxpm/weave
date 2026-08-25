@@ -84,3 +84,21 @@ variable "pubsub_push_audience" {
   default     = "weave-ingestion"
   description = "Fixed OIDC audience for the Pub/Sub push subscription; validated by the handler."
 }
+
+variable "create_chat_service" {
+  type        = bool
+  default     = false
+  description = "Deploy the public Google Chat interaction endpoint."
+}
+
+variable "chat_image_tag" {
+  type        = string
+  default     = ""
+  description = "Image tag for the weave-chat service."
+}
+
+variable "chat_audience" {
+  type        = string
+  default     = ""
+  description = "Audience Chat mints tokens for: the weave-chat URL. Set after the first apply."
+}

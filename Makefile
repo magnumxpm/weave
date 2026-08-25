@@ -54,6 +54,13 @@ build-image:
 	  --gcs-source-staging-dir=gs://$(PROJECT_ID)-adk-staging/cloudbuild \
 	  --service-account=projects/$(PROJECT_ID)/serviceAccounts/weave-build-sa@$(PROJECT_ID).iam.gserviceaccount.com .
 
+build-chat-image:
+	gcloud builds submit --project=$(PROJECT_ID) \
+	  --config=services/chat/cloudbuild.yaml \
+	  --substitutions=_IMAGE=$(REGION)-docker.pkg.dev/$(PROJECT_ID)/weave/chat:$(IMAGE_TAG) \
+	  --gcs-source-staging-dir=gs://$(PROJECT_ID)-adk-staging/cloudbuild \
+	  --service-account=projects/$(PROJECT_ID)/serviceAccounts/weave-build-sa@$(PROJECT_ID).iam.gserviceaccount.com .
+
 build-subscription-image:
 	gcloud builds submit --project=$(PROJECT_ID) \
 	  --config=services/subscription_manager/cloudbuild.yaml \

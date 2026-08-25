@@ -52,3 +52,8 @@ output "chat_events_topic" {
 output "artifact_registry_repo" {
   value = "${var.region}-docker.pkg.dev/${var.project_id}/${google_artifact_registry_repository.weave.repository_id}"
 }
+
+output "chat_service_url" {
+  value       = var.create_chat_service ? google_cloud_run_v2_service.chat[0].uri : ""
+  description = "Paste into the Chat console as App URL, and as the Authentication Audience."
+}
