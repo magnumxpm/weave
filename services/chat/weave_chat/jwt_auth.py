@@ -23,6 +23,21 @@ from weave_ingestion.oidc import PushAuthError
 CHAT_ISSUER = "chat@system.gserviceaccount.com"
 
 
+def allowed_senders(project_number: str) -> frozenset[str]:
+    """The two identities Google signs Chat traffic with.
+
+    A classic Chat app sends as chat@system. An app registered as a Workspace
+    add-on -- what the Chat API console creates today -- sends as the *add-ons
+    service agent of the app's own project*, observed live as
+    service-<project-number>@gcp-sa-gsuiteaddons. That identity is project-bound:
+    another project's agent carries a different number, so pinning ours admits
+    no one new. The audience check has already tied the token to this URL.
+    """
+    return frozenset(
+        {CHAT_ISSUER, f"service-{project_number}@gcp-sa-gsuiteaddons.iam.gserviceaccount.com"}
+    )
+
+
 def describe_token(token: str) -> dict[str, Any]:
     """Unverified `aud`/`iss`/`email` of a token, for logging a rejection only.
 
@@ -41,7 +56,7 @@ def describe_token(token: str) -> dict[str, Any]:
     return {key: claims.get(key) for key in ("aud", "iss", "email", "azp")}
 
 
-def verify_chat_token(token: str, *, audience: str) -> dict[str, Any]:
+def verify_chat_token(token: str, *, audience: str, senders: frozenset[str]) -> dict[str, Any]:
     """Return Chat's verified claims, or raise; never returns another sender's token."""
     import google.auth.transport.requests
     from google.oauth2 import id_token
@@ -55,6 +70,6 @@ def verify_chat_token(token: str, *, audience: str) -> dict[str, Any]:
 
     if not claims.get("email_verified"):
         raise PushAuthError("email not verified")
-    if claims.get("email") != CHAT_ISSUER:
+    if claims.get("email") not in senders:
         raise PushAuthError(f"unexpected sender: {claims.get('email')}")
     return claims

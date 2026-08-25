@@ -10,6 +10,7 @@ from weave_ingestion.oidc import PushAuthError
 
 SETTINGS = ChatSettings(
     project_id="weave-test",
+    project_number="884578202776",
     chat_audience="https://weave-chat.example.run.app",
     chat_events_topic="projects/weave-test/topics/chat-events",
 )
@@ -329,3 +330,35 @@ def test_a_rejection_records_what_the_token_actually_claimed(caplog: Any) -> Non
     with caplog.at_level(logging.WARNING):
         client.post("/", json=message_event(), headers={"Authorization": f"Bearer {token}"})
     assert any("rejected Chat caller" in record.message for record in caplog.records)
+
+
+def test_both_google_chat_signers_are_accepted_and_no_one_else(monkeypatch: Any) -> None:
+    """Observed live: an add-on-shaped app signs as its own project's add-ons
+    service agent, not as chat@system. Another project's agent must still fail."""
+    from weave_chat import jwt_auth
+
+    accepted: dict[str, str] = {}
+
+    def fake_verify(token: str, request: Any, audience: str) -> dict[str, Any]:
+        return {"email_verified": True, "email": token, "aud": audience}
+
+    monkeypatch.setattr(
+        "google.oauth2.id_token.verify_oauth2_token",
+        fake_verify,
+    )
+    senders = jwt_auth.allowed_senders("884578202776")
+
+    for good in (
+        "chat@system.gserviceaccount.com",
+        "service-884578202776@gcp-sa-gsuiteaddons.iam.gserviceaccount.com",
+    ):
+        claims = jwt_auth.verify_chat_token(good, audience="https://a", senders=senders)
+        accepted[good] = claims["email"]
+    assert len(accepted) == 2
+
+    with pytest.raises(PushAuthError):
+        jwt_auth.verify_chat_token(
+            "service-999999999999@gcp-sa-gsuiteaddons.iam.gserviceaccount.com",
+            audience="https://a",
+            senders=senders,
+        )

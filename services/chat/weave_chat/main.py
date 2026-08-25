@@ -32,7 +32,7 @@ from weave_ingestion.logging_config import configure_logging
 from weave_ingestion.oidc import PushAuthError
 
 from weave_chat.config import ChatSettings, settings_from_env
-from weave_chat.jwt_auth import describe_token, verify_chat_token
+from weave_chat.jwt_auth import allowed_senders, describe_token, verify_chat_token
 from weave_chat.responses import dialect_of, is_addon_envelope, new_message, update_message
 
 logger = logging.getLogger(__name__)
@@ -94,9 +94,10 @@ def create_app(
 ) -> FastAPI:
     """Wire the endpoint; every collaborator is injectable for hermetic tests."""
     if token_verifier is None:
+        senders = allowed_senders(settings.project_number)
 
         def token_verifier(token: str) -> dict[str, Any]:
-            return verify_chat_token(token, audience=settings.chat_audience)
+            return verify_chat_token(token, audience=settings.chat_audience, senders=senders)
 
     store = store or CommitmentStore()
     onboarded = onboarded or OnboardedReader(project_id=settings.project_id)

@@ -50,6 +50,10 @@ resource "google_cloud_run_v2_service" "chat" {
         name  = "PROJECT_ID"
         value = var.project_id
       }
+      env {
+        name  = "PROJECT_NUMBER"
+        value = data.google_project.this.number
+      }
       # Chat mints tokens for the audience configured in the console. With
       # Authentication Audience set to the endpoint URL that is this service's
       # own URL, which cannot reference itself here -- so it is filled in on a
