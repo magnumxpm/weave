@@ -305,3 +305,27 @@ def test_base64_helper_is_unused_here_but_payloads_stay_bytes() -> None:
     raw = json.dumps(message_event()).encode()
     client.post("/", content=raw, headers={**AUTH, "Content-Type": "application/json"})
     assert base64.b64decode(base64.b64encode(published[0])) == raw
+
+
+def test_a_rejection_records_what_the_token_actually_claimed(caplog: Any) -> None:
+    """A wrong audience and an unexpected signer both look like 401 from outside."""
+    import base64
+    import json
+    import logging
+
+    from weave_chat.jwt_auth import describe_token
+
+    claims = {"aud": "884578202776", "iss": "https://accounts.google.com", "email": "x@y.com"}
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    token = f"header.{payload}.signature"
+
+    assert describe_token(token)["aud"] == "884578202776"
+    assert describe_token("not-a-jwt") == {"unparsed": True}
+
+    def reject(_: str) -> dict[str, Any]:
+        raise PushAuthError("signature/audience check failed")
+
+    client, _, _ = build(verifier=reject)
+    with caplog.at_level(logging.WARNING):
+        client.post("/", json=message_event(), headers={"Authorization": f"Bearer {token}"})
+    assert any("rejected Chat caller" in record.message for record in caplog.records)

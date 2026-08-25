@@ -31,7 +31,7 @@ from weave_ingestion.firestore_client import ONBOARDED
 from weave_ingestion.oidc import PushAuthError
 
 from weave_chat.config import ChatSettings, settings_from_env
-from weave_chat.jwt_auth import verify_chat_token
+from weave_chat.jwt_auth import describe_token, verify_chat_token
 from weave_chat.responses import dialect_of, is_addon_envelope, new_message, update_message
 
 logger = logging.getLogger(__name__)
@@ -111,7 +111,17 @@ def create_app(
         try:
             token_verifier(token)
         except PushAuthError as error:
-            logger.warning("rejected Chat caller", extra={"reason": str(error)})
+            # Log the token's own (unverified) claims alongside the rejection:
+            # a wrong audience and an unexpected signer both surface as 401, and
+            # only the claims say which one happened.
+            logger.warning(
+                "rejected Chat caller",
+                extra={
+                    "reason": str(error),
+                    "expected_audience": settings.chat_audience,
+                    "token_claims": describe_token(token),
+                },
+            )
             return False
         return True
 

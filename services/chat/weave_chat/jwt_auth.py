@@ -13,11 +13,32 @@ handles for Pub/Sub push and the context broker.
 
 from __future__ import annotations
 
+import base64
+import binascii
+import json
 from typing import Any
 
 from weave_ingestion.oidc import PushAuthError
 
 CHAT_ISSUER = "chat@system.gserviceaccount.com"
+
+
+def describe_token(token: str) -> dict[str, Any]:
+    """Unverified `aud`/`iss`/`email` of a token, for logging a rejection only.
+
+    Which identity signs a Chat request and which audience it targets depends on
+    console settings this service cannot read, so a bare 401 leaves you guessing
+    between a wrong audience and an unexpected signer. These claims are decoded
+    without any signature check and must never influence an authorization
+    decision -- they exist so one rejected request names its own cause.
+    """
+    try:
+        payload = token.split(".")[1]
+        padded = payload + "=" * (-len(payload) % 4)
+        claims = json.loads(base64.urlsafe_b64decode(padded))
+    except (IndexError, ValueError, binascii.Error, UnicodeDecodeError):
+        return {"unparsed": True}
+    return {key: claims.get(key) for key in ("aud", "iss", "email", "azp")}
 
 
 def verify_chat_token(token: str, *, audience: str) -> dict[str, Any]:
