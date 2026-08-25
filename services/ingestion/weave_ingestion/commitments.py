@@ -28,6 +28,26 @@ BLOCKER_THRESHOLD = 0.80
 CANDIDATE_WINDOW = 40
 
 
+def judgement_text(enriched: Any) -> str:
+    """Everything known about one mention, for the same-commitment judgement.
+
+    The description is a tidied restatement; the words actually spoken live in
+    source_text and the enrichment in details. A stated dependency ("we can't
+    start until the review is signed off") survives in those and is paraphrased
+    out of the description, so judging on the description alone is why the graph
+    had no edges at all. The mention's stored excerpt stays the description --
+    this richer text is for judgement, never for display.
+    """
+    item = enriched.item
+    parts = [item.description]
+    for extra in (item.source_text, enriched.details):
+        text = (extra or "").strip()
+        # Skip near-duplicates: the enricher often echoes the description back.
+        if text and text.casefold() not in parts[0].casefold():
+            parts.append(text)
+    return "\n".join(parts)
+
+
 def commitment_id_for(mention_ref: str) -> str:
     """Return the replay-stable id for a commitment's first mention."""
     return str(uuid5(NAMESPACE_URL, f"weave-commitment:{mention_ref}"))
@@ -364,7 +384,7 @@ def reconcile_meeting(
             for candidate in candidates
         ]
         try:
-            decision = llm_decide(excerpt, safe_candidates)
+            decision = llm_decide(judgement_text(row.enriched), safe_candidates)
         except Exception:  # noqa: BLE001 - a mention must never be dropped
             logger.exception("commitment judgment failed; creating an original commitment")
             decision = ReconcileDecision(
@@ -400,7 +420,13 @@ def reconcile_meeting(
             )
 
         blocked_by = None
-        if decision.blocking_hint:
+        # The model answers a stated dependency either by quoting it or by
+        # naming the candidate outright; both are legitimate, and an id that is
+        # in the candidate list needs no similarity search to confirm.
+        if decision.blocking_hint and decision.blocking_hint in candidate_ids:
+            if decision.blocking_hint != decision.matched_commitment_id:
+                blocked_by = decision.blocking_hint
+        elif decision.blocking_hint:
             try:
                 blocker_vectors = embed_documents([decision.blocking_hint])
                 blocker_candidates = store.candidates_for(
@@ -411,11 +437,16 @@ def reconcile_meeting(
                     for candidate in blocker_candidates
                     if candidate.get("commitment_id") != decision.matched_commitment_id
                 ]
-                if (
-                    blocker_candidates
-                    and float(blocker_candidates[0].get("similarity") or 0) >= BLOCKER_THRESHOLD
-                ):
-                    blocked_by = str(blocker_candidates[0].get("commitment_id"))
+                best = blocker_candidates[0] if blocker_candidates else None
+                # No similarity means the lexical fallback answered, which ranks
+                # by recency. An edge from that would be a guess wearing a
+                # measurement's clothes, so it is dropped deliberately.
+                measured = None if best is None else best.get("similarity")
+                if measured is None:
+                    if best is not None:
+                        logger.info("blocking hint unscored; dependency edge dropped")
+                elif float(measured) >= BLOCKER_THRESHOLD:
+                    blocked_by = str(best.get("commitment_id"))
             except Exception:  # noqa: BLE001 - an uncertain edge is dropped, never guessed
                 logger.exception("blocking hint resolution failed; dropping dependency edge")
 

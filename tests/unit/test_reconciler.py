@@ -94,3 +94,125 @@ def test_reconciler_never_turns_model_inference_into_closed() -> None:
     )
     reconcile_meeting(store, lambda text, candidates: matched_close, [row()])
     assert store.applied[0][0].inferred_state is CommitmentState.LIKELY_COMPLETE
+
+
+class BlockerStore:
+    """Answers the mention lookup and the blocking-hint lookup separately."""
+
+    def __init__(self, hint_candidates: list[dict[str, Any]]) -> None:
+        self.hint_candidates = hint_candidates
+        self.applied: list[dict[str, Any]] = []
+
+    def candidates_for(self, owner: str, embedding: Any) -> list[dict[str, Any]]:
+        # The mention itself is new; only the hint lookup has candidates.
+        return self.hint_candidates if embedding == [9.0] else []
+
+    def apply(self, decision: ReconcileDecision, mention: Any, *args: Any, **kwargs: Any) -> str:
+        self.applied.append({"decision": decision, "blocked_by": kwargs.get("blocked_by")})
+        return commitment_id_for(mention.mention_ref)
+
+
+def hinting(hint: str | None) -> ReconcileDecision:
+    return ReconcileDecision(
+        matched_commitment_id=None,
+        confidence=1.0,
+        relationship=MentionRelationship.ORIGINAL,
+        canonical_title="Start the migration",
+        inferred_state=CommitmentState.OPEN,
+        blocking_hint=hint,
+    )
+
+
+def _fake_embed(monkeypatch: Any) -> None:
+    monkeypatch.setattr(
+        "weave_ingestion.embeddings.embed_documents", lambda texts: [[9.0] for _ in texts]
+    )
+
+
+def test_a_stated_dependency_becomes_an_edge_to_the_named_blocker(monkeypatch: Any) -> None:
+    """The graph's whole value is this edge; nothing else had ever exercised it."""
+    _fake_embed(monkeypatch)
+    store = BlockerStore([{"commitment_id": "c-review", "similarity": 0.91}])
+
+    reconcile_meeting(
+        store, lambda text, candidates: hinting("cannot begin until the review"), [row()]
+    )
+
+    assert store.applied[0]["blocked_by"] == "c-review"
+
+
+def test_a_weak_hint_match_creates_no_edge_rather_than_a_guessed_one(monkeypatch: Any) -> None:
+    _fake_embed(monkeypatch)
+    store = BlockerStore([{"commitment_id": "c-review", "similarity": 0.62}])
+
+    reconcile_meeting(store, lambda text, candidates: hinting("something vaguely related"), [row()])
+
+    assert store.applied[0]["blocked_by"] is None
+
+
+def test_no_hint_means_no_edge_even_when_a_close_candidate_exists(monkeypatch: Any) -> None:
+    """Topical similarity alone must never imply a dependency."""
+    _fake_embed(monkeypatch)
+    store = BlockerStore([{"commitment_id": "c-review", "similarity": 0.99}])
+
+    reconcile_meeting(store, lambda text, candidates: hinting(None), [row()])
+
+    assert store.applied[0]["blocked_by"] is None
+
+
+def test_a_candidate_without_a_similarity_score_cannot_create_an_edge(monkeypatch: Any) -> None:
+    """The lexical fallback returns no similarity, so an edge there would be
+    ranked-by-recency rather than measured -- it must be dropped."""
+    _fake_embed(monkeypatch)
+    store = BlockerStore([{"commitment_id": "c-review"}])
+
+    reconcile_meeting(store, lambda text, candidates: hinting("blocked on the review"), [row()])
+
+    assert store.applied[0]["blocked_by"] is None
+
+
+def test_an_embedding_failure_drops_the_edge_without_losing_the_mention(
+    monkeypatch: Any,
+) -> None:
+    def explode(texts: Any) -> Any:
+        raise RuntimeError("embedding backend down")
+
+    monkeypatch.setattr("weave_ingestion.embeddings.embed_documents", explode)
+    store = BlockerStore([{"commitment_id": "c-review", "similarity": 0.95}])
+
+    reconcile_meeting(store, lambda text, candidates: hinting("blocked on the review"), [row()])
+
+    assert len(store.applied) == 1
+    assert store.applied[0]["blocked_by"] is None
+
+
+def test_a_hint_naming_a_candidate_outright_is_honoured_without_a_search(
+    monkeypatch: Any,
+) -> None:
+    """Live models answer the dependency question with the candidate id as often
+    as with a quote; embedding "c-review" as prose would score low and lose it."""
+
+    def explode(texts: Any) -> Any:  # proves no similarity search was needed
+        raise AssertionError("should not embed a hint that already names a candidate")
+
+    monkeypatch.setattr("weave_ingestion.embeddings.embed_documents", explode)
+
+    class Store(BlockerStore):
+        def candidates_for(self, owner: str, embedding: Any) -> list[dict[str, Any]]:
+            return [{"commitment_id": "c-review", "title": "Complete the review"}]
+
+    store = Store([])
+    reconcile_meeting(store, lambda text, candidates: hinting("c-review"), [row()])
+
+    assert store.applied[0]["blocked_by"] == "c-review"
+
+
+def test_a_hint_naming_an_id_outside_the_candidates_is_not_trusted(monkeypatch: Any) -> None:
+    """Same fail-closed rule as matched_commitment_id: a hallucinated id is not
+    a dependency, and it must not become one by a different route."""
+    _fake_embed(monkeypatch)
+    store = BlockerStore([{"commitment_id": "c-review", "similarity": 0.1}])
+
+    reconcile_meeting(store, lambda text, candidates: hinting("c-invented"), [row()])
+
+    assert store.applied[0]["blocked_by"] is None
