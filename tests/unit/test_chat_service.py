@@ -293,9 +293,10 @@ def test_malformed_payloads_are_acked_not_retried() -> None:
     assert published == []
 
 
-def test_healthz_needs_no_token() -> None:
+def test_health_needs_no_token() -> None:
+    """Not /healthz: Google's edge answers that path before the container does."""
     client, _, _ = build()
-    assert client.get("/healthz").json() == {"status": "ok"}
+    assert client.get("/health").json() == {"status": "ok"}
 
 
 def test_base64_helper_is_unused_here_but_payloads_stay_bytes() -> None:

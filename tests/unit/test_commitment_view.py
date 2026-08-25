@@ -164,3 +164,26 @@ def test_summary_counts_only_what_is_there() -> None:
     assert summarize([]) == "Nothing open"
     views = build_views([row("a", deadline="2026-08-01"), row("b")], today=TODAY)
     assert summarize(views) == "2 open commitments · 1 overdue"
+
+
+def test_carry_over_is_dropped_when_it_only_restates_the_reason() -> None:
+    """Both surfaces showed "Raised in 2 meetings" twice for the same commitment."""
+    same_day = only(
+        build_views(
+            [row("same", mention_count=2, first_seen="2026-08-24", last_mentioned="2026-08-24")],
+            today=TODAY,
+        ),
+        "same",
+    )
+    assert same_day.reason == "Raised in 2 meetings"
+    assert same_day.carry_over is None
+
+    spanning = only(
+        build_views(
+            [row("span", mention_count=2, first_seen="2026-07-01", last_mentioned="2026-08-24")],
+            today=TODAY,
+        ),
+        "span",
+    )
+    assert spanning.carry_over == "Raised in 2 meetings over 7 weeks"
+    assert spanning.carry_over != spanning.reason

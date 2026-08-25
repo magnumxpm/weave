@@ -199,15 +199,21 @@ def _reason(row: dict[str, Any], group: UrgencyGroup, dependents: int, today: da
     return "Open, no deadline set"
 
 
-def _carry_over(row: dict[str, Any]) -> str | None:
-    """The span the commitment graph exists to make visible."""
+def _carry_over(row: dict[str, Any], reason: str) -> str | None:
+    """The span the commitment graph exists to make visible.
+
+    Returns None when it would only restate `reason`: a row whose sole signal is
+    its mention count already says so in the reason, and repeating the identical
+    phrase reads as a rendering bug in both a card and a sentence.
+    """
     count = int(row.get("mention_count") or 1)
     if count < 2:
         return None
     first, last = as_date(row.get("first_seen")), as_date(row.get("last_mentioned"))
     if first and last and last > first:
         return f"Raised in {_plural(count, 'meeting')} over {_span((last - first).days)}"
-    return f"Raised in {_plural(count, 'meeting')}"
+    summary = f"Raised in {_plural(count, 'meeting')}"
+    return None if summary == reason else summary
 
 
 class CommitmentView(FrozenModel):
@@ -262,6 +268,7 @@ def decorate_rows(
         item_id = str(row.get("commitment_id") or "")
         count = dependents.get(item_id, 0)
         group = _urgency(row, count, today)
+        reason = _reason(row, group, count, today)
         decorated.append(
             {
                 **row,
@@ -269,8 +276,8 @@ def decorate_rows(
                 "open_dependents": count,
                 "urgency": group.value,
                 "urgency_label": GROUP_LABELS[group],
-                "attention_reason": _reason(row, group, count, today),
-                "carry_over_summary": _carry_over(row),
+                "attention_reason": reason,
+                "carry_over_summary": _carry_over(row, reason),
             }
         )
     return sorted(

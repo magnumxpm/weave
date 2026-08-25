@@ -180,8 +180,10 @@ def create_app(
             return update_message(card, addon=addon)
         return new_message(fallback, addon=addon)
 
-    @app.get("/healthz")
-    def healthz() -> dict[str, str]:
+    # Not /healthz: Google's edge answers that path itself before a request
+    # reaches the container, so a probe there tells you nothing about this app.
+    @app.get("/health")
+    def health() -> dict[str, str]:
         return {"status": "ok"}
 
     @app.post("/")
