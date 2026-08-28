@@ -8,6 +8,7 @@ from weave_common import (
     CommitmentStatus,
     EnrichedActionItem,
     MeetingInsights,
+    MeetingSummaryContent,
 )
 
 
@@ -48,6 +49,7 @@ def test_items_for_owner_is_case_insensitive_and_filters_non_actionable() -> Non
     insights = MeetingInsights(
         conference_record_id="conferenceRecords/1",
         meeting_date=date(2026, 8, 22),
+        summary=MeetingSummaryContent(overview="A meeting summary"),
         items=[
             item(CommitmentStatus.ACCEPTED),
             item(CommitmentStatus.DECLINED),
@@ -71,3 +73,18 @@ def test_enriched_display_fields_are_additive_and_length_bounded() -> None:
     assert EnrichedActionItem(item=action).title is None
     with pytest.raises(ValidationError):
         EnrichedActionItem(item=action, details="x" * 701)
+
+
+def test_meeting_summary_is_required_and_bounded() -> None:
+    with pytest.raises(ValidationError):
+        MeetingInsights.model_validate(
+            {
+                "conference_record_id": "conferenceRecords/1",
+                "meeting_date": "2026-08-22",
+                "items": [],
+            }
+        )
+    with pytest.raises(ValidationError):
+        MeetingSummaryContent(overview="")
+    with pytest.raises(ValidationError):
+        MeetingSummaryContent(overview="Summary", topics=[str(index) for index in range(13)])

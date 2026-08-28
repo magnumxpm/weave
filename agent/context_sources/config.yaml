@@ -1,6 +1,8 @@
 sources:
   - name: prior_meetings
     enabled: true
+  - name: meeting_summaries
+    enabled: true
   - name: google_docs
     enabled: true
   - name: google_tasks

@@ -1,8 +1,9 @@
 """Synchronous Pub/Sub push handler: the entire pipeline runs inside one request.
 
 Flow (build plan v2): verify OIDC → claim meeting (idempotency lease) → fetch
-artifacts → Model Armor input → Agent Engine pipeline → isolate delivery per
-owner → write action items → mark delivered. Retryable processing exceptions
+artifacts → Model Armor input → Agent Engine pipeline → atomically persist the
+summary and action items → reconcile commitments → isolate delivery per owner →
+mark delivered. Retryable processing exceptions
 mark `failed`; owner delivery exceptions are recorded and acknowledged.
 """
 
@@ -113,6 +114,7 @@ def _build_live_source(settings: Settings, directory) -> MeetArtifactSource:
         build_meet_service,
         directory.email_for_user_id,
         build_drive_service,
+        workspace_timezone=settings.workspace_timezone,
     )
 
 
@@ -484,6 +486,26 @@ def create_app(
                 return Response(status_code=200)
 
             result = run_pipeline(pipeline_request)
+            visible_to = [attendee.email for attendee in pipeline_request.attendees]
+            written_rows = (
+                ledger.persist_meeting(
+                    conference_id,
+                    pipeline_request,
+                    result,
+                    visible_to=visible_to,
+                )
+                or []
+            )
+            reconcile_status = "completed"
+            try:
+                reconcile_rows(written_rows)
+            except Exception:  # noqa: BLE001 - persisted history remains deliverable
+                reconcile_status = "failed"
+                logger.exception(
+                    "commitment reconciliation failed",
+                    extra={"conference_id": conference_id},
+                )
+
             onboarded = ledger.onboarded_by_email()
             delivery_outcomes: dict[str, str] = {}
             for bundle in result.bundles:
@@ -506,23 +528,6 @@ def create_app(
                         extra={"conference_id": conference_id, "owner_email": owner},
                     )
                     delivery_outcomes[owner] = "delivery_failed"
-            written_rows = (
-                ledger.write_action_items(
-                    conference_id,
-                    result.bundles,
-                    visible_to=[attendee.email for attendee in pipeline_request.attendees],
-                )
-                or []
-            )
-            reconcile_status = "completed"
-            try:
-                reconcile_rows(written_rows)
-            except Exception:  # noqa: BLE001 - delivery/history already succeeded
-                reconcile_status = "failed"
-                logger.exception(
-                    "commitment reconciliation failed",
-                    extra={"conference_id": conference_id},
-                )
             status = (
                 "delivered_partial"
                 if "delivery_failed" in delivery_outcomes.values()

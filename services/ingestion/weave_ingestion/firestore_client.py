@@ -9,14 +9,27 @@ from datetime import UTC, date, datetime, timedelta
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, field_validator
-from weave_common import EnrichedActionItem, EnrichedOwnerBundle
+from weave_common import (
+    EnrichedActionItem,
+    EnrichedOwnerBundle,
+    MeetingSummaryContent,
+    PipelineRequest,
+    PipelineResult,
+)
 
 logger = logging.getLogger(__name__)
 
 LEASE = timedelta(minutes=15)
 MEETINGS = "processed_meetings"
 ACTION_ITEMS = "action_items"
+MEETING_SUMMARIES = "meeting_summaries"
 ONBOARDED = "onboarded_users"
+MAX_BATCH_WRITES = 500
+
+
+def meeting_summary_ref(conference_record_id: str) -> str:
+    meeting_id = conference_record_id.rsplit("/", 1)[-1]
+    return f"{MEETING_SUMMARIES}/{meeting_id}"
 
 
 @dataclass(frozen=True)
@@ -28,6 +41,7 @@ class WrittenActionItem:
     meeting_date: date
     enriched: EnrichedActionItem
     embedding: list[float] | None
+    meeting_summary_ref: str | None = None
 
 
 class OnboardedUser(BaseModel):
@@ -207,12 +221,27 @@ class MeetingLedger:
         visible_to: list[str],
     ) -> list[WrittenActionItem]:
         """Persist items with the meeting's attendee list as the ACL."""
+        documents, written = self._action_item_documents(conference_id, bundles, visible_to)
+        collection = self.client.collection(ACTION_ITEMS)
+        for document_id, document in documents:
+            collection.document(document_id).set(document)
+        return written
+
+    def _action_item_documents(
+        self,
+        conference_id: str,
+        bundles: list[EnrichedOwnerBundle],
+        visible_to: list[str],
+    ) -> tuple[list[tuple[str, dict[str, Any]]], list[WrittenActionItem]]:
         from google.cloud.firestore_v1.vector import Vector
 
         from weave_ingestion.embeddings import DIMENSIONS, embed_documents
 
         now = datetime.now(UTC)
-        collection = self.client.collection(ACTION_ITEMS)
+        summary_ref = meeting_summary_ref(conference_id)
+        normalized_visible_to = sorted(
+            {email.strip().casefold() for email in visible_to if email.strip()}
+        )
         rows = [
             (bundle, index, enriched)
             for bundle in bundles
@@ -235,10 +264,12 @@ class MeetingLedger:
                 vectors = None
 
         written: list[WrittenActionItem] = []
+        documents: list[tuple[str, dict[str, Any]]] = []
         for row_index, (bundle, index, enriched) in enumerate(rows):
             item = enriched.item
             document = {
                 "conference_record_id": conference_id,
+                "meeting_summary_ref": summary_ref,
                 "description": item.description,
                 "source_text": item.source_text,
                 "references": [reference.model_dump(mode="json") for reference in item.references],
@@ -249,13 +280,13 @@ class MeetingLedger:
                 "title": enriched.title,
                 "details": enriched.details,
                 "meeting_date": bundle.meeting_date.isoformat(),
-                "visible_to": visible_to,
+                "visible_to": normalized_visible_to,
                 "created_at": now,
             }
             if vectors is not None:
                 document["embedding"] = Vector(vectors[row_index])
             mention_ref = f"{conference_id}--{bundle.owner_email}--{index}"
-            collection.document(mention_ref).set(document)
+            documents.append((mention_ref, document))
             written.append(
                 WrittenActionItem(
                     mention_ref=mention_ref,
@@ -263,6 +294,95 @@ class MeetingLedger:
                     meeting_date=bundle.meeting_date,
                     enriched=enriched,
                     embedding=vectors[row_index] if vectors is not None else None,
+                    meeting_summary_ref=summary_ref,
                 )
             )
+        return documents, written
+
+    def _summary_document(
+        self,
+        request: PipelineRequest,
+        summary: MeetingSummaryContent,
+        visible_to: list[str],
+    ) -> dict[str, Any]:
+        from google.cloud.firestore_v1.vector import Vector
+
+        from weave_ingestion.embeddings import DIMENSIONS, embed_documents
+
+        content = summary.model_dump(mode="json")
+        text = "\n".join(
+            [
+                request.meeting_title or "",
+                summary.overview,
+                *summary.topics,
+                *summary.decisions,
+                *summary.implementation_notes,
+                *summary.reproduction_steps,
+            ]
+        )
+        vector: list[float] | None = None
+        try:
+            vectors = (self._embed_documents_fn or embed_documents)([text])
+            if len(vectors) != 1 or len(vectors[0]) != DIMENSIONS:
+                raise ValueError("embedding response shape does not match meeting summary")
+            vector = vectors[0]
+        except Exception:  # noqa: BLE001 - summary remains searchable lexically
+            logger.exception("meeting-summary embedding failed; writing lexical summary")
+
+        now = datetime.now(UTC)
+        document: dict[str, Any] = {
+            "conference_record_id": request.conference_record_id,
+            "meeting_summary_ref": meeting_summary_ref(request.conference_record_id),
+            "meeting_title": request.meeting_title,
+            "meeting_date": request.meeting_date.isoformat(),
+            "started_at": request.started_at,
+            **content,
+            "visible_to": sorted(
+                {email.strip().casefold() for email in visible_to if email.strip()}
+            ),
+            "created_at": now,
+            "updated_at": now,
+        }
+        if vector is not None:
+            document["embedding"] = Vector(vector)
+        return document
+
+    def persist_meeting(
+        self,
+        conference_id: str,
+        request: PipelineRequest,
+        result: PipelineResult,
+        visible_to: list[str],
+    ) -> list[WrittenActionItem]:
+        """Atomically publish one meeting's summary and immutable action mentions."""
+        if result.conference_record_id != request.conference_record_id:
+            raise ValueError("pipeline result conference does not match request")
+        documents, written = self._action_item_documents(conference_id, result.bundles, visible_to)
+        if len(documents) + 1 > MAX_BATCH_WRITES:
+            raise ValueError("meeting exceeds Firestore atomic batch limit")
+
+        summary_id = request.conference_record_id.rsplit("/", 1)[-1]
+        summary_document = self._summary_document(request, result.summary, visible_to)
+        if hasattr(self.client, "batch"):
+            batch = self.client.batch()
+            for document_id, document in documents:
+                batch.set(self.client.collection(ACTION_ITEMS).document(document_id), document)
+            batch.set(
+                self.client.collection(MEETING_SUMMARIES).document(summary_id),
+                summary_document,
+            )
+            batch.commit()
+        else:  # Lightweight local fakes; production Firestore always supports batches.
+            for document_id, document in documents:
+                self.client.collection(ACTION_ITEMS).document(document_id).set(document)
+            self.client.collection(MEETING_SUMMARIES).document(summary_id).set(summary_document)
+        logger.info(
+            "meeting summary and action items persisted",
+            extra={
+                "conference_id": conference_id,
+                "action_item_count": len(written),
+                "attendee_count": len(summary_document["visible_to"]),
+                "summary_embedded": "embedding" in summary_document,
+            },
+        )
         return written

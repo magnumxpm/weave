@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 from typing import Literal
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -26,6 +27,7 @@ class Settings(BaseModel):
     # Admin impersonated for directory lookups only. The Meet fetch impersonates
     # the user whose subscription produced each event, never this account.
     admin_subject: str = ""
+    workspace_timezone: str
 
     @model_validator(mode="after")
     def source_specific_requirements(self) -> Settings:
@@ -37,6 +39,10 @@ class Settings(BaseModel):
             not self.admin_subject
         ):
             raise ValueError("admin_subject is required for live reads or chat delivery")
+        try:
+            ZoneInfo(self.workspace_timezone)
+        except ZoneInfoNotFoundError as error:
+            raise ValueError("workspace_timezone must be a valid IANA timezone") from error
         return self
 
 
@@ -57,4 +63,5 @@ def settings_from_env() -> Settings:
         delivery_mode=os.environ.get("DELIVERY_MODE", "chat"),  # type: ignore[arg-type]
         admin_subject=os.environ.get("ADMIN_SUBJECT", ""),
         subscription_job_name=os.environ.get("SUBSCRIPTION_JOB_NAME", ""),
+        workspace_timezone=os.environ["WORKSPACE_TIMEZONE"],
     )

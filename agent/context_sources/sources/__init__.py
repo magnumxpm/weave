@@ -2,6 +2,12 @@
 
 from agent.context_sources.sources.google_docs_source import GoogleDocsSource
 from agent.context_sources.sources.google_tasks_source import GoogleTasksSource
+from agent.context_sources.sources.meeting_summary_source import MeetingSummarySource
 from agent.context_sources.sources.prior_meeting_source import PriorMeetingSource
 
-__all__ = ["GoogleDocsSource", "GoogleTasksSource", "PriorMeetingSource"]
+__all__ = [
+    "GoogleDocsSource",
+    "GoogleTasksSource",
+    "MeetingSummarySource",
+    "PriorMeetingSource",
+]

@@ -1,7 +1,9 @@
 # Weave
 
-Weave extracts commitment-verified action items from Google Meet transcripts, enriches each
-owner's items only with context that owner may see, and renders one review card per owner.
+Weave extracts commitment-verified action items and structured meeting summaries from Google Meet
+transcripts, enriches each owner's items only with context that owner may see, and renders one
+review card per owner. Summaries retain transcript-grounded topics, decisions, implementation
+notes, and reproduction steps for later meeting-aware retrieval.
 There is no write path into work systems: the worst case of prompt injection is a bad
 suggestion on a card a human reviews. Firestore writes are limited to pipeline state,
 onboarding preferences, owner-visible action-item history, and human-confirmed lifecycle
@@ -35,8 +37,8 @@ documented Vertex variables in `.env.example`) before running `make eval` or `ma
 
 ## Future scope
 
-Context sources are currently Google-only: prior meeting action items plus owner-visible
-Docs/Drive files and the owner's open Google Tasks. Delegated Google reads go through an
+Context sources are currently Google-only: attendee-visible prior meeting action items and
+summaries, owner-visible Docs/Drive files, and the owner's open Google Tasks. Delegated Google reads go through an
 authenticated ingestion context broker; Agent Engine never receives domain-wide delegation.
 External connectors (Jira, Confluence, and other
 OAuth-capable services) are deferred but designed for: each becomes a `ContextSource`

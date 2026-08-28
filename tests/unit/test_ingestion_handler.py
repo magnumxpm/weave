@@ -16,6 +16,7 @@ from weave_common import (
     EnrichedActionItem,
     EnrichedOwnerBundle,
     MatchType,
+    MeetingSummaryContent,
     PipelineRequest,
     PipelineResult,
     TranscriptTurn,
@@ -43,6 +44,7 @@ def settings() -> Settings:
         artifact_source="fixture",
         fixture_dir="/tmp/unused",
         delivery_mode="log",
+        workspace_timezone="Asia/Kolkata",
     )
 
 
@@ -72,6 +74,10 @@ def pipeline_result() -> PipelineResult:
     )
     return PipelineResult(
         conference_record_id="conferenceRecords/abc123",
+        summary=MeetingSummaryContent(
+            overview="The team reviewed the report.",
+            topics=["Report"],
+        ),
         bundles=[
             EnrichedOwnerBundle(
                 owner_email="ana@example.com",
@@ -157,8 +163,16 @@ class FakeLedger:
     ) -> None:
         self.offboarding_writes.append({"user_id": user_id, "email": email, "dm_space": dm_space})
 
-    def write_action_items(self, conference_id: str, bundles: Any, visible_to: Any) -> None:
+    def persist_meeting(
+        self,
+        conference_id: str,
+        request: PipelineRequest,
+        result: PipelineResult,
+        visible_to: Any,
+    ) -> list[Any]:
+        del request, result
         self.items.append({"conference_id": conference_id, "visible_to": visible_to})
+        return []
 
 
 class FakeScreen:
@@ -389,6 +403,28 @@ def test_happy_path_delivers_writes_and_acks() -> None:
     assert ledger.deliveries["abc123"] == {"ana@example.com": "delivered"}
     assert ledger.items[0]["visible_to"] == ["ana@example.com", "bob@example.com"]
     assert screen.texts == ["hello"]
+
+
+def test_persistence_failure_prevents_delivery_and_retries_the_meeting() -> None:
+    class FailingLedger(FakeLedger):
+        def persist_meeting(
+            self,
+            conference_id: str,
+            request: PipelineRequest,
+            result: PipelineResult,
+            visible_to: Any,
+        ) -> list[Any]:
+            del conference_id, request, result, visible_to
+            raise RuntimeError("Firestore unavailable")
+
+    ledger = FailingLedger()
+    client, _, ledger, deliverer, _ = build(ledger=ledger)
+
+    response = client.post("/pubsub-push", json=push_body(), headers=AUTH)
+
+    assert response.status_code == 500
+    assert deliverer.delivered == []
+    assert ledger.status["abc123"] == "failed"
 
 
 def test_not_onboarded_owner_is_skipped_but_items_are_written() -> None:

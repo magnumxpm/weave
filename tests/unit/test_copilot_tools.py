@@ -1,4 +1,4 @@
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import agent.copilot.tools as tools
@@ -44,6 +44,7 @@ class Store:
             },
         ]
         self.closed: list[tuple[str, str]] = []
+        self.meeting_calls: list[tuple[Any, ...]] = []
 
     def list_commitments(self, owner: str, status: str = "") -> list[dict[str, Any]]:
         assert owner == "owner@example.com"
@@ -60,6 +61,22 @@ class Store:
         assert item_id == "dependent"
         assert mention_ref == "meeting--0"
         return "Dependent cannot start until blocker is complete"
+
+    def search_meeting_summaries(
+        self, owner: str, query: str, start: date | None, end: date | None, *, limit: int
+    ) -> list[dict[str, Any]]:
+        self.meeting_calls.append(("search", owner, query, start, end, limit))
+        return [{"meeting_summary_ref": "meeting_summaries/one", "overview": "Launch review"}]
+
+    def get_meeting_summary(self, owner: str, reference: str) -> dict[str, Any] | None:
+        self.meeting_calls.append(("get", owner, reference))
+        return {"meeting_summary_ref": reference, "overview": "Launch review"}
+
+    def list_commitment_mentions(
+        self, owner: str, start: date | None, end: date | None
+    ) -> list[dict[str, Any]]:
+        self.meeting_calls.append(("mentions", owner, start, end))
+        return [{"mention_ref": "one--owner@example.com--0", "description": "Send report"}]
 
 
 def test_tools_refuse_without_session_principal(monkeypatch: Any) -> None:
@@ -105,3 +122,26 @@ def test_all_lists_everything_and_a_bad_filter_is_an_error_not_an_empty_list(
     assert len(bad) == 1
     assert "error" in bad[0]
     assert "all" in bad[0]["valid_status_filter_values"]
+
+
+def test_meeting_and_date_tools_are_principal_scoped(monkeypatch: Any) -> None:
+    store = Store()
+    monkeypatch.setattr(tools, "_store", lambda: store)
+    monkeypatch.setenv("WORKSPACE_TIMEZONE", "Asia/Kolkata")
+    context = Context("owner@example.com")
+
+    summaries = tools.search_my_meetings("launch", "2026-08-20", 5, context)  # type: ignore[arg-type]
+    exact = tools.get_meeting_summary("meeting_summaries/one", context)  # type: ignore[arg-type]
+    mentions = tools.list_my_commitment_mentions("2026-08-20", context)  # type: ignore[arg-type]
+
+    assert summaries[0]["overview"] == "Launch review"
+    assert exact["found"] is True
+    assert mentions[0]["description"] == "Send report"
+    assert all(call[1] == "owner@example.com" for call in store.meeting_calls)
+
+
+def test_invalid_date_is_an_error_not_an_empty_result(monkeypatch: Any) -> None:
+    monkeypatch.setattr(tools, "_store", lambda: Store())
+    monkeypatch.setenv("WORKSPACE_TIMEZONE", "Asia/Kolkata")
+    result = tools.search_my_meetings("launch", "eventually", 5, Context("owner@example.com"))  # type: ignore[arg-type]
+    assert "error" in result[0]

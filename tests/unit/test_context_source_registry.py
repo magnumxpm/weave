@@ -8,6 +8,7 @@ from weave_common import ContextMatch, MatchType
 
 from agent.context_sources.base import AuthMode, ContextSource, SearchPrincipal
 from agent.context_sources.registry import build_sources, register_source, search_all
+from agent.context_sources.sources.meeting_summary_source import MeetingSummarySource
 from agent.context_sources.sources.prior_meeting_source import PriorMeetingSource
 from agent.tools.search_related_context_tool import make_search_related_context_tool
 from tests.unit.fakes import FakeFirestoreClient, FakeSnapshot
@@ -164,6 +165,71 @@ def test_prior_meeting_source_returns_nothing_when_nothing_relates() -> None:
     assert source.search("renew the parking permit", principal) == []
 
 
+def test_meeting_summary_source_applies_attendee_acl_before_ranking() -> None:
+    documents = [
+        FakeSnapshot(
+            "visible",
+            {
+                "conference_record_id": "conferenceRecords/visible",
+                "overview": "The team diagnosed an OAuth redirect failure.",
+                "topics": ["Authentication"],
+                "visible_to": ["owner@example.com"],
+                "meeting_date": "2026-08-20",
+            },
+        ),
+        FakeSnapshot(
+            "hidden",
+            {
+                "conference_record_id": "conferenceRecords/hidden",
+                "overview": "Secret OAuth acquisition discussion.",
+                "visible_to": ["other@example.com"],
+                "meeting_date": "2026-08-21",
+            },
+        ),
+    ]
+
+    class Query:
+        def __init__(self) -> None:
+            self.principal = ""
+            self.cap = 40
+
+        def where(self, *, filter: object) -> Query:
+            assert filter.field_path == "visible_to"
+            assert filter.op_string == "array_contains"
+            self.principal = filter.value
+            return self
+
+        def order_by(self, field: str, *, direction: object) -> Query:
+            del direction
+            assert field == "meeting_date"
+            return self
+
+        def limit(self, value: int) -> Query:
+            self.cap = value
+            return self
+
+        def stream(self) -> list[FakeSnapshot]:
+            return [row for row in documents if self.principal in row.data["visible_to"]][
+                : self.cap
+            ]
+
+    class Client:
+        def collection(self, name: str) -> Query:
+            assert name == "meeting_summaries"
+            return Query()
+
+    source = MeetingSummarySource(
+        client=Client(),
+        embed_query_fn=lambda query: (_ for _ in ()).throw(RuntimeError(query)),
+    )
+    results = source.search("OAuth failure", SearchPrincipal(email="owner@example.com"))
+
+    assert [result.ref for result in results] == ["meeting_summaries/visible"]
+    assert results[0].match_type is MatchType.MEETING_SUMMARY
+    assert results[0].conference_record_id == "conferenceRecords/visible"
+    assert all("Secret" not in result.snippet for result in results)
+
+
 def test_the_current_meeting_is_not_its_own_prior_context() -> None:
     class OwnMeetingSource(ContextSource):
         name = "own_meeting"
@@ -183,6 +249,7 @@ def test_the_current_meeting_is_not_its_own_prior_context() -> None:
                 )
                 for ref, title in (
                     ("abc123--owner@example.com--0", "this meeting, replayed"),
+                    ("meeting_summaries/abc123", "this meeting summary"),
                     ("older99--owner@example.com--0", "an actually prior meeting"),
                 )
             ]

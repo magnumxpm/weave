@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from typing import Any
 
@@ -12,6 +12,7 @@ from google.adk.tools.tool_context import ToolContext
 from weave_common import decorate_rows
 
 from agent.context_sources.broker_client import fetch_broker_matches
+from agent.copilot.date_windows import parse_date_window
 from agent.copilot.store_reader import CopilotStoreReader
 
 logger = logging.getLogger(__name__)
@@ -144,6 +145,76 @@ def search_my_history(query: str, tool_context: ToolContext) -> list[dict[str, A
     """Search raw meeting mentions that are visible to me."""
     principal = _principal(tool_context)
     return [] if principal is None else _store().search_history(principal, query)
+
+
+def _date_window(when: str) -> tuple[date | None, date | None] | dict[str, Any]:
+    timezone_name = os.environ.get("WORKSPACE_TIMEZONE", "")
+    if not timezone_name:
+        return {"error": "WORKSPACE_TIMEZONE is not configured"}
+    try:
+        window = parse_date_window(when, timezone_name)
+        logger.info(
+            "copilot date window resolved",
+            extra={
+                "has_start": window[0] is not None,
+                "has_end": window[1] is not None,
+                "timezone": timezone_name,
+            },
+        )
+        return window
+    except (KeyError, ValueError) as error:
+        return {"error": str(error), "when": when}
+
+
+def search_my_meetings(
+    query: str, when: str, limit: int, tool_context: ToolContext
+) -> list[dict[str, Any]]:
+    """Search summaries of meetings I attended by topic and/or local date.
+
+    Args:
+        query: Topic text, or an empty string for date-only lookup.
+        when: Empty/all, today, yesterday, weekday, last weekday, this week,
+            last week, YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD.
+        limit: Maximum summaries to return, from 1 through 20.
+    """
+    principal = _principal(tool_context)
+    if principal is None:
+        return []
+    window = _date_window(when)
+    if isinstance(window, dict):
+        return [window]
+    start, end = window
+    return _store().search_meeting_summaries(
+        principal, query, start, end, limit=max(1, min(limit or 10, 20))
+    )
+
+
+def get_meeting_summary(meeting_summary_ref: str, tool_context: ToolContext) -> dict[str, Any]:
+    """Get one meeting summary only when that meeting is visible to me."""
+    principal = _principal(tool_context)
+    if principal is None:
+        return {"found": False}
+    row = _store().get_meeting_summary(principal, meeting_summary_ref)
+    return {"found": row is not None, **(row or {})}
+
+
+def list_my_commitment_mentions(when: str, tool_context: ToolContext) -> list[dict[str, Any]]:
+    """List commitments assigned to me in meetings in a local-date window.
+
+    Args:
+        when: Today, yesterday, weekday, last weekday, this week, last week,
+            YYYY-MM-DD, or YYYY-MM-DD..YYYY-MM-DD.
+    """
+    principal = _principal(tool_context)
+    if principal is None:
+        return []
+    window = _date_window(when)
+    if isinstance(window, dict):
+        return [window]
+    start, end = window
+    if start is None and end is None:
+        return [{"error": "when is required for commitment mention lookup"}]
+    return _store().list_commitment_mentions(principal, start, end)
 
 
 def search_workspace_evidence(

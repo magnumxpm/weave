@@ -9,6 +9,16 @@ variable "region" {
   description = "Region for Cloud Run, Artifact Registry, Firestore, and Scheduler."
 }
 
+variable "workspace_timezone" {
+  type        = string
+  description = "IANA timezone used for meeting dates and relative Copilot date queries. Must be supplied explicitly for every deployment."
+
+  validation {
+    condition     = can(regex("^[A-Za-z_+-]+/[A-Za-z0-9_+/-]+$", var.workspace_timezone))
+    error_message = "workspace_timezone must be an explicit IANA-style name such as Asia/Kolkata."
+  }
+}
+
 variable "create_cloud_run" {
   type        = bool
   default     = false

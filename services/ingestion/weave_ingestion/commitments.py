@@ -202,6 +202,8 @@ class CommitmentStore:
                     "created_from": mention.mention_ref,
                     "first_seen": mention.meeting_date.isoformat(),
                     "last_mentioned": mention.meeting_date.isoformat(),
+                    "first_meeting_summary_ref": mention.meeting_summary_ref,
+                    "latest_meeting_summary_ref": mention.meeting_summary_ref,
                     "mention_count": 1,
                     "deadline": deadline.isoformat() if deadline else None,
                     "waiting_on": decision.waiting_on,
@@ -221,6 +223,8 @@ class CommitmentStore:
                 if existing_owner != owner:
                     raise PermissionError("commitment owner mismatch")
                 existing_deadline = _as_date(existing.get("deadline"))
+                existing_first = _as_date(existing.get("first_seen")) or mention.meeting_date
+                existing_last = _as_date(existing.get("last_mentioned")) or mention.meeting_date
                 latest_deadline = max(
                     (value for value in (existing_deadline, deadline) if value is not None),
                     default=None,
@@ -228,7 +232,7 @@ class CommitmentStore:
                 closed = existing.get("status") == CommitmentState.CLOSED.value
                 payload = {
                     "last_mentioned": max(
-                        _as_date(existing.get("last_mentioned")) or mention.meeting_date,
+                        existing_last,
                         mention.meeting_date,
                     ).isoformat(),
                     # Mentions do not arrive in meeting order. A backfill walks
@@ -237,13 +241,17 @@ class CommitmentStore:
                     # last_mentioned - first_seen understates the carry-over age
                     # that is the whole point of tracking the commitment.
                     "first_seen": min(
-                        _as_date(existing.get("first_seen")) or mention.meeting_date,
+                        existing_first,
                         mention.meeting_date,
                     ).isoformat(),
                     "mention_count": int(existing.get("mention_count") or 0) + 1,
                     "deadline": latest_deadline.isoformat() if latest_deadline else None,
                     "updated_at": now,
                 }
+                if mention.meeting_summary_ref and mention.meeting_date <= existing_first:
+                    payload["first_meeting_summary_ref"] = mention.meeting_summary_ref
+                if mention.meeting_summary_ref and mention.meeting_date >= existing_last:
+                    payload["latest_meeting_summary_ref"] = mention.meeting_summary_ref
                 if not closed:
                     payload.update(
                         title=decision.canonical_title,
@@ -457,6 +465,7 @@ def reconcile_meeting(
             meeting_date=row.meeting_date,
             relationship=decision.relationship,
             excerpt=excerpt,
+            meeting_summary_ref=row.meeting_summary_ref,
         )
         try:
             commitment_ids.append(

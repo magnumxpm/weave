@@ -95,6 +95,7 @@ def test_an_inconsistent_reference_never_costs_the_meeting() -> None:
         {
             "conference_record_id": "conferenceRecords/one",
             "meeting_date": "2026-08-23",
+            "summary": {"overview": "A meeting summary"},
             "items": [
                 {
                     **item_with(resolved()).model_dump(mode="json"),

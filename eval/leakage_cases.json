@@ -56,6 +56,15 @@
         "user_content": {"role": "user", "parts": [{"text": "Enrich this exact item for a@example.com: {\"description\":\"Send her the completed documentation\",\"source_text\":\"send her the completed documentation\",\"references\":[{\"mention\":\"her\",\"turn_ref\":1,\"status\":\"unknown\"}],\"action_type\":\"task\",\"status\":\"accepted\",\"owner_email\":\"a@example.com\",\"owner_confidence\":0.95,\"commitment_turn_ref\":1,\"resolution_turn_ref\":2}"}]},
         "final_response": {"role": "model", "parts": [{"text": "Write an imperative title such as Complete and share the documentation that contains neither her nor a guessed recipient; keep matches empty."}]}
       }]
+    },
+    {
+      "eval_id": "current_summary_informs_only_relevant_details",
+      "session_input": {"app_name": "enrichment_agent", "user_id": "a@example.com", "state": {"search_principal": {"email": "a@example.com", "credential_ref": null}, "owner_email": "a@example.com", "meeting_date": "2026-08-23", "meeting_summary": {"overview": "The team discussed authentication and catering.", "topics": ["Authentication", "Catering"], "decisions": ["Refresh the token before retrying."], "implementation_notes": ["Update the retry handler."], "reproduction_steps": ["Expire the token.", "Open the app.", "Retry login."]}}},
+      "conversation": [{
+        "invocation_id": "current-summary-1",
+        "user_content": {"role": "user", "parts": [{"text": "Current meeting summary: {\"overview\":\"The team discussed authentication and catering.\",\"topics\":[\"Authentication\",\"Catering\"],\"decisions\":[\"Refresh the token before retrying.\"],\"implementation_notes\":[\"Update the retry handler.\"],\"reproduction_steps\":[\"Expire the token.\",\"Open the app.\",\"Retry login.\"]}. Enrich this exact item for a@example.com: {\"description\":\"Implement the token refresh and verify the login reproduction steps\",\"action_type\":\"task\",\"status\":\"accepted\",\"owner_email\":\"a@example.com\",\"owner_confidence\":0.95,\"commitment_turn_ref\":1,\"resolution_turn_ref\":2}"}]},
+        "final_response": {"role": "model", "parts": [{"text": "Keep the action item unchanged. Its details use the token-refresh decision, retry-handler implementation note, and three reproduction steps, and do not mention catering."}]}
+      }]
     }
   ]
 }

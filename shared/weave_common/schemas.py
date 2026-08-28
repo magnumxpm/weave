@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -53,6 +53,7 @@ class ActionType(StrEnum):
 
 class MatchType(StrEnum):
     EXISTING_PRIOR_ITEM = "existing_prior_item"
+    MEETING_SUMMARY = "meeting_summary"
     RELATED_DISCUSSION = "related_discussion"
     RELATED_DOCUMENT = "related_document"
     OPEN_TASK = "open_task"
@@ -144,9 +145,28 @@ class ActionItem(FrozenModel):
         return self.status in ACTIONABLE_STATUSES
 
 
+class MeetingSummaryContent(FrozenModel):
+    """Bounded, transcript-grounded context shared across one meeting."""
+
+    overview: str = Field(min_length=1, max_length=2000)
+    topics: list[Annotated[str, Field(min_length=1, max_length=160)]] = Field(
+        default_factory=list, max_length=12
+    )
+    decisions: list[Annotated[str, Field(min_length=1, max_length=400)]] = Field(
+        default_factory=list, max_length=20
+    )
+    implementation_notes: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        default_factory=list, max_length=20
+    )
+    reproduction_steps: list[Annotated[str, Field(min_length=1, max_length=500)]] = Field(
+        default_factory=list, max_length=20
+    )
+
+
 class MeetingInsights(FrozenModel):
     conference_record_id: str
     meeting_date: date
+    summary: MeetingSummaryContent
     items: list[ActionItem] = Field(default_factory=list)
 
     def items_for_owner(self, email: str) -> list[ActionItem]:
@@ -170,6 +190,7 @@ class ContextMatch(FrozenModel):
     ref: str | None = None
     score: float | None = Field(default=None, ge=0.0, le=1.0)
     occurred_on: date | None = None
+    conference_record_id: str | None = None
 
 
 class CommitmentMention(FrozenModel):
@@ -177,6 +198,7 @@ class CommitmentMention(FrozenModel):
     meeting_date: date
     relationship: MentionRelationship
     excerpt: str
+    meeting_summary_ref: str | None = None
 
 
 class Commitment(FrozenModel):
@@ -191,6 +213,8 @@ class Commitment(FrozenModel):
     mention_count: int = Field(ge=1)
     deadline: date | None = None
     waiting_on: str | None = None
+    first_meeting_summary_ref: str | None = None
+    latest_meeting_summary_ref: str | None = None
 
 
 class ReconcileDecision(FrozenModel):
@@ -246,5 +270,6 @@ class PipelineRequest(FrozenModel):
 
 class PipelineResult(FrozenModel):
     conference_record_id: str
+    summary: MeetingSummaryContent
     bundles: list[EnrichedOwnerBundle]
     dropped_item_count: int = Field(ge=0)

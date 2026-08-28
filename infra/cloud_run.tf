@@ -38,6 +38,10 @@ resource "google_cloud_run_v2_service" "ingestion" {
         value = var.region
       }
       env {
+        name  = "WORKSPACE_TIMEZONE"
+        value = var.workspace_timezone
+      }
+      env {
         name  = "AGENT_ENGINE_ID"
         value = var.agent_engine_id
       }

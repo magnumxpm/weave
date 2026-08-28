@@ -103,6 +103,7 @@ class PriorMeetingSource(ContextSource):
                     ref=getattr(snapshot, "id", None),
                     score=max(0.0, min(1.0, 1.0 - distance)),
                     occurred_on=self._occurred_on(record.get("meeting_date")),
+                    conference_record_id=str(record.get("conference_record_id") or "") or None,
                 )
             )
         return matches
@@ -131,6 +132,7 @@ class PriorMeetingSource(ContextSource):
                     ref=getattr(snapshots[index], "id", None),
                     score=round(score, 4),
                     occurred_on=self._occurred_on(record.get("meeting_date")),
+                    conference_record_id=str(record.get("conference_record_id") or "") or None,
                 )
             )
         return matches

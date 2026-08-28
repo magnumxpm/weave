@@ -8,6 +8,7 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from weave_common import Attendee, PipelineRequest, TranscriptTurn
 
@@ -77,10 +78,13 @@ class LiveMeetArtifactSource(MeetArtifactSource):
         build_meet_service: Any,
         resolve_email: Any,
         build_drive_service: Any | None = None,
+        *,
+        workspace_timezone: str,
     ) -> None:
         self._build_meet_service = build_meet_service
         self._build_drive_service = build_drive_service
         self._resolve_email = resolve_email
+        self._workspace_timezone = ZoneInfo(workspace_timezone)
         self._meet: Any = None
         self._drive: Any = None
 
@@ -122,7 +126,7 @@ class LiveMeetArtifactSource(MeetArtifactSource):
         record_name = f"conferenceRecords/{conference_id}"
         record = self._meet.conferenceRecords().get(name=record_name).execute()
         started_at = datetime.fromisoformat(record["startTime"].replace("Z", "+00:00"))
-        meeting_date = started_at.date()
+        meeting_date = started_at.astimezone(self._workspace_timezone).date()
 
         participants = self._paginate(
             self._meet.conferenceRecords().participants().list, "participants", parent=record_name

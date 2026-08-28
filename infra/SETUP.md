@@ -42,14 +42,15 @@ time with `gcloud services enable` is also fine (Terraform adopts them).
 
 ```bash
 # edit infra/terraform.tfvars: project_id, region
+export WORKSPACE_TIMEZONE=<IANA_TIMEZONE> # required explicitly; no repository default
 make infra-init
-make infra-pass1
+make infra-pass1 WORKSPACE_TIMEZONE="$WORKSPACE_TIMEZONE"
 ```
 
 Creates: 4 service accounts + roles, Pub/Sub topics + DLQ subscription + the
 Meet publisher and service-agent bindings, the project-scoped
 `iam.allowedPolicyMemberDomains` exception, Firestore native DB + the
-`action_items` composite index, both Model Armor templates, Artifact Registry,
+`action_items` and `meeting_summaries` composite/vector indexes, both Model Armor templates, Artifact Registry,
 and the paused Scheduler job. Record the two `*_unique_id` outputs for step 5.
 
 Notes:
@@ -62,7 +63,7 @@ Notes:
 ## 4. Verify pass 1
 
 ```bash
-make infra-plan          # must converge to "No changes"
+make infra-plan WORKSPACE_TIMEZONE="$WORKSPACE_TIMEZONE" # must converge to "No changes"
 gcloud firestore indexes composite list --project=<PROJECT_ID>   # both indexes READY
 ```
 
@@ -180,7 +181,8 @@ modifier and silently mangles the URL into a 404.)
 
 ```bash
 make build-image             # Cloud Build, sha tag, dedicated weave-build-sa
-make infra-pass2 AGENT_ENGINE_ID=<from D2> IMAGE_TAG=$(git rev-parse --short HEAD)
+make infra-pass2 AGENT_ENGINE_ID=<from D2> IMAGE_TAG=$(git rev-parse --short HEAD) \
+  WORKSPACE_TIMEZONE="$WORKSPACE_TIMEZONE"
 ```
 
 Pass 2 defaults to `artifact_source=fixture` and `delivery_mode=log`, so the
@@ -221,7 +223,8 @@ make build-subscription-image
 
 cd infra && tofu apply -var create_cloud_run=true -var image_tag=<tag> \
   -var agent_engine_id=<id> -var create_subscription_manager=true \
-  -var subscription_manager_image_tag=<tag>
+  -var subscription_manager_image_tag=<tag> \
+  -var workspace_timezone="$WORKSPACE_TIMEZONE"
 
 gcloud run jobs execute weave-subscription-manager --region=$REGION --project=$PROJECT_ID
 gcloud scheduler jobs resume weave-subscription-manager --location=$REGION --project=$PROJECT_ID
@@ -328,7 +331,7 @@ Docs/Tasks reads only through `/context/search`.
    ```bash
    export PROJECT_ID=<PROJECT_ID> REGION=us-central1
    export AGENT_SA=weave-agent-sa@$PROJECT_ID.iam.gserviceaccount.com
-   make deploy-copilot
+   make deploy-copilot WORKSPACE_TIMEZONE="$WORKSPACE_TIMEZONE"
    # COPILOT_ENGINE_ID=projects/.../reasoningEngines/N
    ```
 

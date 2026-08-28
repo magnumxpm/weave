@@ -8,7 +8,7 @@ from datetime import date
 from google.adk.agents import LlmAgent
 from google.adk.runners import InMemoryRunner
 from google.genai import types
-from weave_common import ActionItem, OwnerItemList
+from weave_common import ActionItem, MeetingSummaryContent, OwnerItemList
 
 from agent.callbacks import log_enrichment_scope
 from agent.config import MODEL_NAME
@@ -55,6 +55,7 @@ def make_run_enrichment(
         *,
         conference_record_id: str = "",
         meeting_date: date | None = None,
+        meeting_summary: MeetingSummaryContent | None = None,
     ) -> OwnerItemList:
         runner = InMemoryRunner(agent=agent, app_name="weave_enrichment")
         session = runner.session_service.create_session_sync(
@@ -68,6 +69,9 @@ def make_run_enrichment(
                 # results, and by log_enrichment_scope.
                 "conference_record_id": conference_record_id,
                 "meeting_date": meeting_date.isoformat() if meeting_date else None,
+                "meeting_summary": (
+                    meeting_summary.model_dump(mode="json") if meeting_summary else None
+                ),
             },
         )
         prompt = OwnerItemList(
@@ -78,6 +82,8 @@ def make_run_enrichment(
         prompt += (
             f"\nCurrent meeting date: {meeting_date.isoformat() if meeting_date else 'unknown'}"
         )
+        if meeting_summary is not None:
+            prompt += f"\nCurrent meeting summary: {meeting_summary.model_dump_json()}"
         prompt += f"\nAction items: [{serialized_items}]"
         events = list(
             runner.run(

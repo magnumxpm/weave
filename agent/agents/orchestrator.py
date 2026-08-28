@@ -124,6 +124,7 @@ def run_pipeline(
                 owner_items.copy(),
                 conference_record_id=request.conference_record_id,
                 meeting_date=request.meeting_date,
+                meeting_summary=insights.summary,
             )
             scoped_items = enforce_owner_scope(owner_email, owner_items, result)
             if owner_items and not scoped_items:
@@ -153,6 +154,7 @@ def run_pipeline(
 
     return PipelineResult(
         conference_record_id=request.conference_record_id,
+        summary=insights.summary,
         bundles=bundles,
         dropped_item_count=dropped,
     )

@@ -114,17 +114,27 @@ def source(
     *,
     docs_destination: dict[str, str] | None = None,
     drive: DriveService | None = None,
+    workspace_timezone: str = "UTC",
 ) -> LiveMeetArtifactSource:
     return LiveMeetArtifactSource(
         lambda subject: MeetService(participants, docs_destination),
         resolve,
         (lambda subject: drive) if drive is not None else None,
+        workspace_timezone=workspace_timezone,
     )
 
 
 def test_live_fetch_requires_a_subject_rather_than_guessing() -> None:
     with pytest.raises(ValueError, match="subject"):
         source([], lambda user_id: "x@example.com").fetch("c")
+
+
+def test_meeting_date_uses_the_configured_workspace_timezone(monkeypatch: Any) -> None:
+    monkeypatch.setitem(RECORD, "startTime", "2026-08-22T23:30:00Z")
+    request = source(
+        [], lambda user_id: "unused@example.com", workspace_timezone="Asia/Kolkata"
+    ).fetch("c", subject="admin@example.com")
+    assert request.meeting_date.isoformat() == "2026-08-23"
 
 
 def test_anonymous_participants_are_skipped_without_a_lookup() -> None:

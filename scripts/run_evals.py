@@ -30,6 +30,8 @@ SUITES = (
             "first_person_reference_resolved",
             "unidentifiable_third_person",
             "second_person_is_the_owner",
+            "structured_summary_with_implementation_details",
+            "summary_without_commitments",
         ),
     ),
     EvalSuite(
@@ -41,6 +43,7 @@ SUITES = (
             "stale_candidate_is_rejected",
             "related_candidate_informs_details",
             "unknown_reference_is_absent_from_title",
+            "current_summary_informs_only_relevant_details",
         ),
         agent_selector="enrichment",
     ),

@@ -45,6 +45,7 @@ PROJECT_ID ?= $(shell cd infra && $(TF) output -raw project_id 2>/dev/null)
 REGION ?= us-central1
 CONTEXT_BROKER_URL ?= $(shell cd infra && $(TF) output -raw ingestion_url 2>/dev/null)
 CONTEXT_BROKER_AUDIENCE ?= $(shell cd infra && $(TF) output -raw pubsub_push_audience 2>/dev/null)
+WORKSPACE_TIMEZONE ?=
 BOOTSTRAP_WITHOUT_CONTEXT_BROKER ?= 0
 
 build-image:
@@ -82,21 +83,26 @@ deploy-agent:
 deploy-copilot:
 	@test -n "$(CONTEXT_BROKER_URL)" || (echo "CONTEXT_BROKER_URL is required" && exit 1)
 	@test -n "$(CONTEXT_BROKER_AUDIENCE)" || (echo "CONTEXT_BROKER_AUDIENCE is required" && exit 1)
+	@test -n "$(WORKSPACE_TIMEZONE)" || (echo "WORKSPACE_TIMEZONE is required" && exit 1)
 	rm -rf dist && uv build --all-packages
 	CONTEXT_BROKER_URL="$(CONTEXT_BROKER_URL)" \
-	  CONTEXT_BROKER_AUDIENCE="$(CONTEXT_BROKER_AUDIENCE)" \
+	CONTEXT_BROKER_AUDIENCE="$(CONTEXT_BROKER_AUDIENCE)" \
+	  WORKSPACE_TIMEZONE="$(WORKSPACE_TIMEZONE)" \
 	  uv run python agent/deployment/deploy_copilot.py
 
 infra-init:
 	cd infra && $(TF) init
 
 infra-plan:
-	cd infra && $(TF) plan
+	@test -n "$(WORKSPACE_TIMEZONE)" || (echo "WORKSPACE_TIMEZONE is required" && exit 1)
+	cd infra && $(TF) plan -var workspace_timezone=$(WORKSPACE_TIMEZONE)
 
 infra-pass1:
-	cd infra && $(TF) apply
+	@test -n "$(WORKSPACE_TIMEZONE)" || (echo "WORKSPACE_TIMEZONE is required" && exit 1)
+	cd infra && $(TF) apply -var workspace_timezone=$(WORKSPACE_TIMEZONE)
 
 infra-pass2:
 	@test -n "$(AGENT_ENGINE_ID)" || (echo "AGENT_ENGINE_ID is required" && exit 1)
 	@test -n "$(IMAGE_TAG)" || (echo "IMAGE_TAG is required" && exit 1)
-	cd infra && $(TF) apply -var create_cloud_run=true -var agent_engine_id=$(AGENT_ENGINE_ID) -var image_tag=$(IMAGE_TAG)
+	@test -n "$(WORKSPACE_TIMEZONE)" || (echo "WORKSPACE_TIMEZONE is required" && exit 1)
+	cd infra && $(TF) apply -var create_cloud_run=true -var agent_engine_id=$(AGENT_ENGINE_ID) -var image_tag=$(IMAGE_TAG) -var workspace_timezone=$(WORKSPACE_TIMEZONE)

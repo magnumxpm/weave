@@ -24,6 +24,8 @@ def main() -> None:
         parser.error("--project and --service-account (or PROJECT_ID / AGENT_SA env) required")
     if not os.environ.get("CONTEXT_BROKER_URL") or not os.environ.get("CONTEXT_BROKER_AUDIENCE"):
         parser.error("CONTEXT_BROKER_URL and CONTEXT_BROKER_AUDIENCE are required")
+    if not os.environ.get("WORKSPACE_TIMEZONE"):
+        parser.error("WORKSPACE_TIMEZONE is required")
     for wheel in WHEELS:
         if not os.path.exists(wheel):
             raise SystemExit(f"missing {wheel}; run `uv build --all-packages` first")
@@ -55,6 +57,7 @@ def main() -> None:
             "MODEL_ARMOR_LOCATION": args.location,
             "CONTEXT_BROKER_URL": os.environ["CONTEXT_BROKER_URL"],
             "CONTEXT_BROKER_AUDIENCE": os.environ["CONTEXT_BROKER_AUDIENCE"],
+            "WORKSPACE_TIMEZONE": os.environ["WORKSPACE_TIMEZONE"],
         },
     )
     print(f"COPILOT_ENGINE_ID={remote.resource_name}")

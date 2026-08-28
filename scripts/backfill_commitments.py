@@ -81,6 +81,7 @@ def main() -> None:
                 details=data.get("details"),
             ),
             embedding=_vector(data.get("embedding")),
+            meeting_summary_ref=data.get("meeting_summary_ref"),
         )
         reconcile_meeting(store, decide, [row])
         processed += 1

@@ -57,6 +57,73 @@ resource "google_firestore_index" "action_items_vector" {
   }
 }
 
+# Owner/date lookup answers "which commitments did I get today/Monday?" without
+# scanning action items belonging to anyone else.
+resource "google_firestore_index" "action_items_owner_date" {
+  database   = google_firestore_database.default.name
+  collection = "action_items"
+
+  fields {
+    field_path = "owner_email"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "meeting_date"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}
+
+# Attendee-scoped date retrieval for meeting summaries.
+resource "google_firestore_index" "meeting_summaries_visibility" {
+  database   = google_firestore_database.default.name
+  collection = "meeting_summaries"
+
+  fields {
+    field_path   = "visible_to"
+    array_config = "CONTAINS"
+  }
+
+  fields {
+    field_path = "meeting_date"
+    order      = "DESCENDING"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "DESCENDING"
+  }
+}
+
+# Semantic summary search preserves the attendee ACL in the vector query.
+resource "google_firestore_index" "meeting_summaries_vector" {
+  database   = google_firestore_database.default.name
+  collection = "meeting_summaries"
+
+  fields {
+    field_path   = "visible_to"
+    array_config = "CONTAINS"
+  }
+
+  fields {
+    field_path = "__name__"
+    order      = "ASCENDING"
+  }
+
+  fields {
+    field_path = "embedding"
+    vector_config {
+      dimension = 768
+      flat {}
+    }
+  }
+}
+
 # Owner equality is part of the commitment vector lookup, so another owner's
 # derived commitment cannot enter candidate reconciliation.
 resource "google_firestore_index" "commitments_vector" {

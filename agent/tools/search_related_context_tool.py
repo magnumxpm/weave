@@ -36,17 +36,12 @@ def _principal_from_state(tool_context: ToolContext) -> SearchPrincipal | None:
         return None
 
 
-def _own_meeting_prefix(tool_context: ToolContext) -> str | None:
-    """Document-id prefix of the meeting being enriched, if state names one.
-
-    `write_action_items` keys documents `{conference_id}--{owner}--{index}`,
-    using the bare id rather than the full `conferenceRecords/<id>` name, so the
-    prefix match below is exact rather than heuristic.
-    """
+def _own_meeting_id(tool_context: ToolContext) -> str | None:
+    """Bare id of the meeting being enriched, if state names one."""
     raw = tool_context.state.get("conference_record_id")
     if not isinstance(raw, str) or not raw.strip():
         return None
-    return f"{raw.rsplit('/', 1)[-1]}--"
+    return raw.rsplit("/", 1)[-1]
 
 
 def _search(
@@ -60,9 +55,15 @@ def _search(
     # A meeting is never its own prior context. Nothing from the current
     # meeting is stored yet on a first run, but a reprocessed one would
     # otherwise offer an item its own earlier copy.
-    prefix = _own_meeting_prefix(tool_context)
-    if prefix is not None:
-        matches = [match for match in matches if not (match.ref or "").startswith(prefix)]
+    meeting_id = _own_meeting_id(tool_context)
+    if meeting_id is not None:
+        matches = [
+            match
+            for match in matches
+            if (match.conference_record_id or "").rsplit("/", 1)[-1] != meeting_id
+            and not (match.ref or "").startswith(f"{meeting_id}--")
+            and match.ref != f"meeting_summaries/{meeting_id}"
+        ]
     return [match.model_dump(mode="json") for match in matches]
 
 

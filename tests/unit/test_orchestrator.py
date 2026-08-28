@@ -11,6 +11,7 @@ from weave_common import (
     EnrichedActionItem,
     MatchType,
     MeetingInsights,
+    MeetingSummaryContent,
     OwnerItemList,
     PipelineRequest,
     Reference,
@@ -59,6 +60,7 @@ def extractor(*items: ActionItem):
         return MeetingInsights(
             conference_record_id=req.conference_record_id,
             meeting_date=req.meeting_date,
+            summary=MeetingSummaryContent(overview="A meeting summary"),
             items=list(items),
         )
 
@@ -269,3 +271,23 @@ def test_non_actionable_and_unroutable_items_are_counted_as_dropped() -> None:
     )
     assert result.dropped_item_count == 2
     assert len(result.bundles) == 1
+
+
+def test_current_summary_is_passed_to_each_owner_enrichment() -> None:
+    seen: list[MeetingSummaryContent] = []
+
+    def enrich(
+        principal: SearchPrincipal,
+        items: list[ActionItem],
+        **kwargs: object,
+    ) -> OwnerItemList:
+        seen.append(kwargs["meeting_summary"])  # type: ignore[arg-type]
+        return passthrough(principal, items)
+
+    result = run_pipeline(
+        request("a@example.com", "b@example.com"),
+        extract=extractor(action("a@example.com"), action("b@example.com")),
+        enrich=enrich,
+    )
+
+    assert seen == [result.summary, result.summary]

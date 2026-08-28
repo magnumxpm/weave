@@ -66,12 +66,13 @@ def decision(match: str | None = None, title: str = "Launch brief") -> Reconcile
     )
 
 
-def mention(reference: str, day: int) -> CommitmentMention:
+def mention(reference: str, day: int, summary_ref: str | None = None) -> CommitmentMention:
     return CommitmentMention(
         mention_ref=reference,
         meeting_date=date(2026, 8, day),
         relationship=MentionRelationship.ORIGINAL,
         excerpt="Ship the launch brief",
+        meeting_summary_ref=summary_ref,
     )
 
 
@@ -142,3 +143,18 @@ def test_close_and_reopen_are_owner_guarded_and_idempotent() -> None:
 def test_uuid5_is_stable_and_mention_specific() -> None:
     assert commitment_id_for("one") == commitment_id_for("one")
     assert commitment_id_for("one") != commitment_id_for("two")
+
+
+def test_commitment_and_mentions_retain_summary_provenance() -> None:
+    client = Client()
+    store = CommitmentStore(client)
+    latest = mention("meeting-2--owner@example.com--0", 24, "meeting_summaries/meeting-2")
+    commitment_id = store.apply(decision(), latest, "owner@example.com", None)
+    earlier = mention("meeting-1--owner@example.com--0", 20, "meeting_summaries/meeting-1")
+    store.apply(decision(commitment_id), earlier, "owner@example.com", None)
+
+    commitment = client.data[("commitments", commitment_id)]
+    assert commitment["first_meeting_summary_ref"] == "meeting_summaries/meeting-1"
+    assert commitment["latest_meeting_summary_ref"] == "meeting_summaries/meeting-2"
+    mention_path = ("commitments", commitment_id, "mentions", earlier.mention_ref)
+    assert client.data[mention_path]["meeting_summary_ref"] == "meeting_summaries/meeting-1"
