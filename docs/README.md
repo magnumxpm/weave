@@ -43,6 +43,7 @@
 
 - **[Architecture](ARCHITECTURE.md)**
   Components, flow, the two-phase pipeline
+  — also as a [designed PDF](Weave_Architecture.pdf)
 - **[Security model](engineering/security.md)**
   Invariants, identity, isolation, ACLs
 - **[Data model](engineering/data-model.md)**

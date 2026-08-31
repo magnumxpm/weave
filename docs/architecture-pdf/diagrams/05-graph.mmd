@@ -1,0 +1,9 @@
+flowchart TB
+  W["new mentions<br/>immutable action_items"] --> C["candidates_for(owner)<br/>vector + lexical, window 40"]
+  C --> J["LLM judgement<br/>ReconcileDecision"]
+  J -->|"confidence ≥ 0.80<br/>and id in candidates"| MERGE["merge into existing commitment"]
+  J -->|"otherwise"| NEW["create commitment (uuid5)"]
+  J -->|"stated precondition"| EDGE["blocked_by edge + evidence"]
+  MERGE --> G[("commitments")]
+  NEW --> G
+  EDGE --> G

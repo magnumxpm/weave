@@ -13,6 +13,7 @@
   <a href="docs/product/overview.md">Overview</a> ·
   <a href="docs/product/features.md">Features</a> ·
   <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/Weave_Architecture.pdf">Architecture&nbsp;PDF</a> ·
   <a href="docs/DEPLOYMENT.md">Deployment</a> ·
   <a href="docs/product/roadmap.md">Roadmap</a>
 </p>
@@ -138,7 +139,7 @@ of traps.
 | | |
 |---|---|
 | 🎯 **Product** | [Overview](docs/product/overview.md) · [Features](docs/product/features.md) · [Scenarios](docs/product/scenarios.md) · [Roadmap](docs/product/roadmap.md) |
-| ⚙️ **Engineering** | [Architecture](docs/ARCHITECTURE.md) · [Security](docs/engineering/security.md) · [Data model](docs/engineering/data-model.md) |
+| ⚙️ **Engineering** | [Architecture](docs/ARCHITECTURE.md) ([PDF](docs/Weave_Architecture.pdf)) · [Security](docs/engineering/security.md) · [Data model](docs/engineering/data-model.md) |
 | 🚀 **Operations** | [Deployment](docs/DEPLOYMENT.md) · [Running Weave](docs/operations/running.md) · [`infra/SETUP.md`](infra/SETUP.md) |
 
 ## Where Weave goes next

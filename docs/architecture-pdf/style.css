@@ -1,0 +1,265 @@
+/* Weave — print stylesheet.
+   A4 portrait with named landscape pages for the two wide sequence figures.
+   Every figure is capped in millimetres so nothing can outgrow its page. */
+
+@page        { size: A4 portrait;  margin: 20mm 20mm 18mm 20mm; }
+@page land   { size: A4 landscape; margin: 16mm; }
+@page cover  { size: A4 portrait;  margin: 0; }
+
+:root {
+  --ink:        #0C1733;
+  --ink-soft:   #33415F;
+  --muted:      #5A6E93;
+  --faint:      #8A9AB8;
+  --blue:       #2573FE;
+  --blue-deep:  #14449E;
+  --blue-wash:  #EDF3FF;
+  --panel:      #FAFBFF;
+  --border:     #DCE5F7;
+  --hair:       #E9EFFA;
+  --green:      #1E9E62;
+  --amber:      #B8860B;
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, 'Helvetica Neue', Helvetica, Arial, sans-serif;
+  font-size: 9.6pt;
+  line-height: 1.52;
+  color: var(--ink-soft);
+  font-variant-numeric: tabular-nums;
+}
+
+p { margin: 0 0 7pt; }
+strong { color: var(--ink); font-weight: 650; }
+em { color: var(--ink); font-style: italic; }
+a { color: var(--blue-deep); text-decoration: none; }
+
+code, .mono {
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  color: var(--blue-deep);
+  background: var(--blue-wash);
+  padding: 0.5pt 2.5pt;
+  border-radius: 2.5pt;
+}
+
+/* ---------- cover ---------------------------------------------------- */
+.cover { page: cover; height: 297mm; display: flex; flex-direction: column; }
+.cover-art {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(155deg, #F7F9FF 0%, #EEF3FF 46%, #E4ECFF 100%);
+  padding: 26mm 22mm 0;
+  position: relative;
+  overflow: hidden;
+}
+.cover-art::after {           /* a woven arc, echoing the mark */
+  content: '';
+  position: absolute;
+  right: -60mm; top: -40mm;
+  width: 160mm; height: 160mm;
+  border: 1.1mm solid rgba(37, 115, 254, 0.13);
+  border-radius: 50%;
+}
+.cover-art::before {
+  content: '';
+  position: absolute;
+  right: -20mm; bottom: -70mm;
+  width: 120mm; height: 120mm;
+  border: 1.1mm solid rgba(37, 115, 254, 0.10);
+  border-radius: 50%;
+}
+.cover-logo { width: 44mm; display: block; margin-bottom: 20mm; }
+.cover-kicker {
+  font-size: 8.4pt; font-weight: 700; letter-spacing: 2.6pt;
+  color: var(--blue); text-transform: uppercase; margin-bottom: 5mm;
+}
+.cover h1 {
+  font-size: 46pt; line-height: 1.02; letter-spacing: -1.6pt;
+  color: var(--ink); margin: 0 0 7mm; font-weight: 700;
+}
+.cover-lede {
+  font-size: 12.4pt; line-height: 1.5; color: var(--ink-soft);
+  max-width: 118mm; margin: 0 0 12mm;
+}
+.cover-rule { width: 26mm; height: 1.1mm; background: var(--blue); border-radius: 1mm;
+  margin-bottom: 4mm; }
+.cover-props { display: flex; gap: 5mm; margin-top: auto; margin-bottom: 24mm;
+  max-width: 166mm; }
+.cover-prop {
+  flex: 1; background: rgba(255,255,255,0.72); border: 0.3mm solid rgba(37,115,254,0.16);
+  border-radius: 3mm; padding: 4mm 4mm 4.5mm;
+}
+.cover-prop b { display: block; font-size: 9pt; color: var(--ink); margin-bottom: 1.5mm; }
+.cover-prop span { font-size: 7.8pt; color: var(--muted); line-height: 1.4; display: block; }
+.cover-foot {
+  background: var(--ink); color: #C9D6F2;
+  padding: 9mm 22mm; display: flex; justify-content: space-between; align-items: baseline;
+  font-size: 8.4pt;
+}
+.cover-foot b { color: #FFFFFF; font-weight: 650; }
+
+/* ---------- structure ------------------------------------------------ */
+section { break-before: page; }
+section.flow { break-before: auto; }
+
+h2 {
+  font-size: 19pt; line-height: 1.18; letter-spacing: -0.5pt; color: var(--ink);
+  margin: 0 0 2mm; font-weight: 700; break-after: avoid;
+}
+h2 + .deck { font-size: 10.4pt; color: var(--muted); margin: 0 0 7mm; max-width: 150mm; }
+h3 {
+  font-size: 11.2pt; color: var(--ink); font-weight: 650; margin: 8mm 0 2.5mm;
+  break-after: avoid;
+}
+h4 {
+  font-size: 8pt; letter-spacing: 1.4pt; text-transform: uppercase; color: var(--muted);
+  font-weight: 700; margin: 6mm 0 2mm; break-after: avoid;
+}
+.kicker {
+  font-size: 7.6pt; font-weight: 700; letter-spacing: 2pt; text-transform: uppercase;
+  color: var(--blue); margin: 0 0 2.5mm;
+}
+.rule { height: 0.3mm; background: var(--hair); margin: 6mm 0; }
+
+ul { margin: 0 0 7pt; padding-left: 4.5mm; }
+li { margin-bottom: 3pt; }
+li::marker { color: var(--blue); }
+
+/* ---------- decision cards ------------------------------------------- */
+.decisions { display: grid; grid-template-columns: 1fr 1fr; gap: 4mm; align-items: start; }
+.decision {
+  break-inside: avoid;
+  border: 0.3mm solid var(--border); border-radius: 3mm;
+  padding: 4.2mm 5mm; background: #FFFFFF;
+}
+.decision-head { display: flex; align-items: baseline; gap: 3.5mm; margin-bottom: 2.4mm; }
+.decision-num {
+  font-size: 13.5pt; font-weight: 700; color: var(--blue); line-height: 1;
+  min-width: 6mm;
+}
+.decision-title { font-size: 10.6pt; font-weight: 650; color: var(--ink); line-height: 1.3; }
+.decision dl { margin: 0; }
+.decision dt {
+  font-size: 7pt; font-weight: 700; letter-spacing: 0.9pt; text-transform: uppercase;
+  color: var(--faint); margin-bottom: 0.8mm;
+}
+.decision dt + dd { margin-bottom: 2.6mm; }
+.decision dd { margin: 0; font-size: 8.9pt; line-height: 1.45; }
+.decision dd.why { color: var(--ink-soft); }
+
+/* ---------- figures --------------------------------------------------- */
+figure {
+  margin: 6mm 0; break-inside: avoid; text-align: center;
+}
+figure svg, figure img { display: block; margin: 0 auto; }
+/* the hard cap: no figure may exceed the printable box */
+figure svg { max-width: 100%; max-height: 205mm; height: auto; }
+figcaption {
+  font-size: 8.2pt; color: var(--muted); margin-top: 3.5mm; text-align: left;
+  padding-left: 0; line-height: 1.45;
+}
+figcaption b { color: var(--ink); font-weight: 650; }
+.fig-frame {
+  border: 0.3mm solid var(--hair); border-radius: 3mm; padding: 5mm 4mm;
+  background: #FFFFFF;
+}
+.fig-w170 svg { width: 170mm; }
+.fig-w132 svg { width: 132mm; }
+.fig-w150 svg { width: 150mm; }
+.fig-w120 svg { width: 120mm; }
+
+/* landscape figure pages */
+.landscape { page: land; break-before: page; }
+.landscape figure { margin: 0; }
+.landscape .fig-frame { padding: 6mm; }
+.landscape svg { width: 100%; max-height: 152mm; }
+.landscape figcaption { max-width: 240mm; margin-top: 3mm; }
+
+/* ---------- tables ---------------------------------------------------- */
+table {
+  width: 100%; border-collapse: collapse; margin: 4mm 0 7mm;
+  font-size: 8.8pt; break-inside: avoid;
+}
+thead th {
+  text-align: left; font-size: 7.4pt; letter-spacing: 1pt; text-transform: uppercase;
+  color: var(--muted); font-weight: 700; padding: 0 3mm 2mm 0;
+  border-bottom: 0.4mm solid var(--border);
+}
+tbody td {
+  padding: 2.6mm 3mm 2.6mm 0; border-bottom: 0.25mm solid var(--hair);
+  vertical-align: top;
+}
+tbody tr:last-child td { border-bottom: none; }
+td.name, td strong:first-child { color: var(--ink); }
+table.tight tbody td { padding: 1.9mm 3mm 1.9mm 0; }
+td .mono, th .mono { white-space: nowrap; }
+
+/* ---------- callouts --------------------------------------------------- */
+.callout {
+  border-left: 1mm solid var(--blue); background: var(--panel);
+  padding: 4mm 5mm; border-radius: 0 2.5mm 2.5mm 0; margin: 5mm 0;
+  break-inside: avoid; font-size: 9.3pt;
+}
+.callout p:last-child { margin-bottom: 0; }
+.callout.warn { border-left-color: var(--amber); background: #FFFBF0; }
+.callout.good { border-left-color: var(--green); background: #F4FBF7; }
+.callout-title {
+  font-size: 7.6pt; letter-spacing: 1.2pt; text-transform: uppercase; font-weight: 700;
+  color: var(--blue); margin-bottom: 1.8mm;
+}
+.warn .callout-title { color: var(--amber); }
+.good .callout-title { color: var(--green); }
+
+/* ---------- two-column notes ------------------------------------------- */
+.cols2 { column-count: 2; column-gap: 8mm; }
+.cols2 > * { break-inside: avoid; }
+
+.props { display: flex; gap: 4mm; margin: 5mm 0 7mm; }
+.prop {
+  flex: 1; border: 0.3mm solid var(--border); border-radius: 3mm; padding: 4mm;
+  break-inside: avoid;
+}
+.prop b { display: block; color: var(--ink); font-size: 9.2pt; margin-bottom: 1.5mm; }
+.prop span { font-size: 8.4pt; color: var(--muted); line-height: 1.45; }
+
+/* ---------- contents ---------------------------------------------------- */
+.toc { margin: 6mm 0 0; }
+.toc-row {
+  display: flex; align-items: baseline; gap: 3mm; padding: 2.2mm 0;
+  border-bottom: 0.25mm solid var(--hair);
+}
+.toc-num { font-size: 8.4pt; font-weight: 700; color: var(--blue); min-width: 7mm; }
+.toc-title { font-size: 9.8pt; color: var(--ink); font-weight: 600; }
+.toc-note { font-size: 8.4pt; color: var(--muted); margin-left: auto; text-align: right; }
+
+/* ---------- closing ------------------------------------------------------ */
+.colophon {
+  border-top: 0.4mm solid var(--border); margin-top: 10mm; padding-top: 5mm;
+  font-size: 8.2pt; color: var(--muted);
+}
+
+/* ---------- a quiet close for a chapter that ends early ------------------ */
+.chapter-close {
+  margin-top: auto; display: flex; align-items: baseline; gap: 4mm;
+  border-top: 0.4mm solid var(--border); padding-top: 4mm; margin-top: 8mm;
+  break-inside: avoid;
+}
+.chapter-close b {
+  font-size: 7.4pt; letter-spacing: 1.2pt; text-transform: uppercase; color: var(--blue);
+  white-space: nowrap; font-weight: 700;
+}
+.chapter-close span { font-size: 9.4pt; color: var(--ink); }
+
+/* the consequences card shares the decision grid's fourth slot */
+.decision.consequences { background: var(--panel); }
+.decision .small { font-size: 8.7pt; color: var(--muted); margin-bottom: 2mm; }
+table.bare { margin: 0; font-size: 8.4pt; }
+table.bare thead th { font-size: 6.8pt; padding-bottom: 1.4mm; }
+table.bare tbody td { padding: 1.5mm 2mm 1.5mm 0; }
