@@ -50,7 +50,7 @@ def main() -> None:
         env_vars={
             "GOOGLE_GENAI_USE_VERTEXAI": "1",
             "PROJECT_ID": args.project,
-            "WEAVE_MODEL": os.environ.get("WEAVE_MODEL", "gemini-2.5-flash"),
+            "WEAVE_MODEL": os.environ.get("WEAVE_MODEL", "gemini-3.5-flash"),
             "MODEL_ARMOR_OUTPUT_TEMPLATE": (
                 f"projects/{args.project}/locations/{args.location}/templates/agent-output"
             ),

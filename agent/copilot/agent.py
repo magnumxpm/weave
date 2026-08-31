@@ -33,7 +33,7 @@ def build_copilot() -> LlmAgent:
         )
     return LlmAgent(
         name="weave_commitment_copilot",
-        model=os.environ.get("WEAVE_MODEL", "gemini-2.5-flash"),
+        model=os.environ.get("WEAVE_MODEL", "gemini-3.5-flash"),
         instruction=COPILOT_INSTRUCTION,
         tools=[
             suggest_next_actions,

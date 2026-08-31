@@ -42,11 +42,25 @@ def render_diagrams(only_missing: bool = False) -> None:
         if only_missing and target.exists():
             continue
         print(f"  mermaid → {target.name}")
-        run([
-            "npx", "-y", "-p", "@mermaid-js/mermaid-cli", "mmdc",
-            "-i", str(source), "-o", str(target),
-            "-c", str(HERE / "mermaid-theme.json"), "-b", "transparent",
-        ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        run(
+            [
+                "npx",
+                "-y",
+                "-p",
+                "@mermaid-js/mermaid-cli",
+                "mmdc",
+                "-i",
+                str(source),
+                "-o",
+                str(target),
+                "-c",
+                str(HERE / "mermaid-theme.json"),
+                "-b",
+                "transparent",
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
 
 
 def render_illustrations() -> None:
@@ -59,9 +73,12 @@ def logo_data_uri() -> str:
 
     image = Image.open(DOCS / "weave_logo.png").convert("RGB")
     background = Image.new("RGB", image.size, (255, 255, 255))
-    bbox = ImageChops.difference(image, background).convert("L").point(
-        lambda v: 255 if v > 8 else 0
-    ).getbbox()
+    bbox = (
+        ImageChops.difference(image, background)
+        .convert("L")
+        .point(lambda v: 255 if v > 8 else 0)
+        .getbbox()
+    )
     cropped = (image.crop(bbox) if bbox else image).convert("RGBA")
     # knock the paper out from behind the mark so it sits on the cover's tint
     pixels = cropped.load()
@@ -73,9 +90,7 @@ def logo_data_uri() -> str:
             elif r > 225 and g > 225 and bl > 225:
                 pixels[x, y] = (r, g, bl, 110)
     cropped.save(BUILD / "logo.png")
-    return "data:image/png;base64," + base64.b64encode(
-        (BUILD / "logo.png").read_bytes()
-    ).decode()
+    return "data:image/png;base64," + base64.b64encode((BUILD / "logo.png").read_bytes()).decode()
 
 
 def inline_svg(name: str) -> str:
@@ -104,16 +119,25 @@ def compose(template: Path, css: str, logo: str) -> str:
     html = html.replace("{{logo}}", logo)
     html = html.replace("{{date}}", dt.date.today().strftime("%B %Y"))
     for match in sorted(set(re.findall(r"\{\{fig:([a-z0-9-]+)\}\}", html))):
-        html = html.replace("{{fig:%s}}" % match, inline_svg(match))
+        html = html.replace(f"{{{{fig:{match}}}}}", inline_svg(match))
     return html
 
 
 def print_pdf(html: Path, pdf: Path) -> None:
-    run([
-        CHROME, "--headless", "--disable-gpu", "--no-pdf-header-footer",
-        "--run-all-compositor-stages-before-draw", "--virtual-time-budget=6000",
-        f"--print-to-pdf={pdf}", html.as_uri(),
-    ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    run(
+        [
+            CHROME,
+            "--headless",
+            "--disable-gpu",
+            "--no-pdf-header-footer",
+            "--run-all-compositor-stages-before-draw",
+            "--virtual-time-budget=6000",
+            f"--print-to-pdf={pdf}",
+            html.as_uri(),
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
 
 
 def merge_and_number(cover: Path, body: Path, out: Path) -> None:
@@ -131,26 +155,37 @@ def merge_and_number(cover: Path, body: Path, out: Path) -> None:
         width, height = page.rect.width, page.rect.height
         baseline = height - 26
         page.draw_line(
-            pymupdf.Point(56, baseline - 12), pymupdf.Point(width - 56, baseline - 12),
-            color=(0.914, 0.937, 0.980), width=0.6,
+            pymupdf.Point(56, baseline - 12),
+            pymupdf.Point(width - 56, baseline - 12),
+            color=(0.914, 0.937, 0.980),
+            width=0.6,
         )
         page.insert_text(
-            pymupdf.Point(56, baseline), "Weave · Architecture",
-            fontname="helv", fontsize=7.5, color=ink,
+            pymupdf.Point(56, baseline),
+            "Weave · Architecture",
+            fontname="helv",
+            fontsize=7.5,
+            color=ink,
         )
         label = f"{index + 1} / {total}"
         page.insert_text(
-            pymupdf.Point(width - 56 - pymupdf.get_text_length(
-                label, fontname="helv", fontsize=7.5), baseline),
-            label, fontname="helv", fontsize=7.5, color=ink,
+            pymupdf.Point(
+                width - 56 - pymupdf.get_text_length(label, fontname="helv", fontsize=7.5), baseline
+            ),
+            label,
+            fontname="helv",
+            fontsize=7.5,
+            color=ink,
         )
 
-    doc.set_metadata({
-        "title": "Weave — Architecture",
-        "author": "Weave",
-        "subject": "How Weave is put together, and why",
-        "keywords": "weave, architecture, google workspace, agent engine",
-    })
+    doc.set_metadata(
+        {
+            "title": "Weave — Architecture",
+            "author": "Weave",
+            "subject": "How Weave is put together, and why",
+            "keywords": "weave, architecture, google workspace, agent engine",
+        }
+    )
     doc.save(out, deflate=True, garbage=3)
     doc.close()
 

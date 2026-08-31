@@ -100,7 +100,7 @@ def main() -> None:
             # project number, which it 404s on. Kept separate from
             # GOOGLE_CLOUD_PROJECT, which would also move the genai endpoint.
             "PROJECT_ID": args.project,
-            "WEAVE_MODEL": os.environ.get("WEAVE_MODEL", "gemini-2.5-flash"),
+            "WEAVE_MODEL": os.environ.get("WEAVE_MODEL", "gemini-3.5-flash"),
             "MODEL_ARMOR_OUTPUT_TEMPLATE": (
                 f"projects/{args.project}/locations/{args.location}/templates/agent-output"
             ),

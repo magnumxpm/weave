@@ -223,8 +223,10 @@ first pass the Google sources safely return no matches. Every later deployment m
 populated Terraform outputs, and `make deploy-agent` refuses without them.
 
 > **Model names are backend-specific.** Agent Engine runs on Vertex, which serves a different
-> catalogue than AI Studio — `gemini-3.x` names resolve with an API key but 404 on Vertex.
-> The default is `gemini-2.5-flash`, overridable with `WEAVE_MODEL`. Confirm first:
+> catalogue than AI Studio, and the two do not carry the same names at the same time. The
+> default is `gemini-3.5-flash`, overridable with `WEAVE_MODEL` — set it to whatever your
+> project actually serves. A name the backend does not serve fails every *meeting* at
+> "no final response" rather than failing the deploy, so confirm it first:
 >
 > ```bash
 > curl -s -X POST -H "Authorization: Bearer $(gcloud auth print-access-token)" \

@@ -163,10 +163,12 @@ return no Google matches until ingestion exists. All subsequent agent deployment
 use the populated outputs. Explicit environment values may be supplied when deploying
 against a different reviewed environment.
 
-**Model names are backend-specific.** Agent Engine runs on Vertex, which serves
-a different catalogue than AI Studio: `gemini-3.x` names resolve with an API key
-but 404 on Vertex. `agent/config.py` defaults to `gemini-2.5-flash` and honours
-`WEAVE_MODEL`. Confirm before deploying:
+**Model names are backend-specific.** Agent Engine runs on Vertex, which serves a
+different catalogue than AI Studio, and a name available on one is not always
+available on the other. `agent/config.py` defaults to `gemini-3.5-flash` and
+honours `WEAVE_MODEL`; override it if this project serves something else.
+Confirm before deploying — an unserved name fails every meeting at "no final
+response", not at deploy time:
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer $(gcloud auth print-access-token)" \

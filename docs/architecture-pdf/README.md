@@ -41,8 +41,9 @@ margins:
 
 ```python
 import pymupdf
+
 doc = pymupdf.open("../Weave_Architecture.pdf")
-for page in doc:                      # every page but the cover should report ~20mm/16mm
+for page in doc:  # every page but the cover should report ~20mm/16mm
     box = None
     for drawing in page.get_drawings():
         box = drawing["rect"] if box is None else box | drawing["rect"]

@@ -2,7 +2,8 @@
 
 import os
 
-# Must exist on the backend actually in use. Agent Engine runs on Vertex, where
-# this project serves gemini-2.5-*; the 3.x names are AI Studio only today, so a
-# newer model is an env override rather than an edit here.
-MODEL_NAME = os.environ.get("WEAVE_MODEL", "gemini-2.5-flash")
+# Must exist on the backend actually in use: Agent Engine runs on Vertex, which
+# serves a different catalogue than AI Studio. Confirm the name resolves there
+# before deploying -- a model the backend does not serve fails every meeting at
+# "no final response", not at startup. WEAVE_MODEL overrides it per deployment.
+MODEL_NAME = os.environ.get("WEAVE_MODEL", "gemini-3.5-flash")

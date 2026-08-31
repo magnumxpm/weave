@@ -341,7 +341,7 @@ def make_llm_decider() -> Callable[[str, list[dict[str, Any]]], ReconcileDecisio
         project=os.environ.get("PROJECT_ID"),
         location=os.environ.get("REGION", "us-central1"),
     )
-    model = os.environ.get("WEAVE_MODEL", "gemini-2.5-flash")
+    model = os.environ.get("WEAVE_MODEL", "gemini-3.5-flash")
 
     def decide(mention_text: str, candidates: list[dict[str, Any]]) -> ReconcileDecision:
         response = client.models.generate_content(
